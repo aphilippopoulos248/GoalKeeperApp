@@ -3,7 +3,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Screen } from '../components/Screen';
-import { getGoalById } from '../data/mockGoal';
+import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
@@ -12,6 +12,7 @@ type Props = NativeStackScreenProps<GoalsStackParamList, 'GoalDetail'>;
 
 export function GoalDetailScreen({ route, navigation }: Props) {
   const { colors } = useAppTheme();
+  const { getGoalById } = useActiveGoals();
   const g = getGoalById(route.params.goalId);
 
   if (!g) {
@@ -67,6 +68,11 @@ export function GoalDetailScreen({ route, navigation }: Props) {
       <Text style={[styles.sectionTitle, { color: colors.text }]}>
         Checkpoints
       </Text>
+      {g.checkpoints.length === 0 ? (
+        <Text style={[styles.emptyCheckpoints, { color: colors.textSecondary }]}>
+          No checkpoints yet.
+        </Text>
+      ) : null}
       {g.checkpoints.map((c) => (
         <View
           key={c.id}
@@ -178,6 +184,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     marginBottom: spacing.md,
+  },
+  emptyCheckpoints: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: spacing.sm,
   },
   checkpoint: {
     flexDirection: 'row',

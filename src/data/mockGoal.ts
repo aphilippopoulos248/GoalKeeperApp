@@ -1,6 +1,7 @@
 import { Goal } from '../types';
 
-export const mockActiveGoals: Goal[] = [
+/** Initial goals when the app loads (seed data). */
+export const SEED_ACTIVE_GOALS: Goal[] = [
   {
     id: 'g-1',
     title: 'Run a 5K without stopping',
@@ -36,7 +37,3 @@ export const mockActiveGoals: Goal[] = [
     ],
   },
 ];
-
-export function getGoalById(id: string): Goal | undefined {
-  return mockActiveGoals.find((g) => g.id === id);
-}

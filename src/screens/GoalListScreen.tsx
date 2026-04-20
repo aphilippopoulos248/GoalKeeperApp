@@ -4,7 +4,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Screen } from '../components/Screen';
-import { mockActiveGoals } from '../data/mockGoal';
+import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
@@ -14,11 +14,12 @@ type Nav = NativeStackNavigationProp<GoalsStackParamList, 'GoalList'>;
 export function GoalListScreen() {
   const { colors } = useAppTheme();
   const navigation = useNavigation<Nav>();
+  const { goals } = useActiveGoals();
 
   return (
     <Screen>
       <Text style={[styles.heading, { color: colors.text }]}>Active goals</Text>
-      {mockActiveGoals.map((item) => (
+      {goals.map((item) => (
         <Pressable
           key={item.id}
           onPress={() =>
@@ -52,7 +53,7 @@ export function GoalListScreen() {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Add goal"
-        onPress={() => {}}
+        onPress={() => navigation.navigate('AddGoal')}
         style={({ pressed }) => [
           styles.addGoalButton,
           {
