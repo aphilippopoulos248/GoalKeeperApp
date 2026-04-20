@@ -72,13 +72,30 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
         quest,
       }));
     }
-    return activeGoals.flatMap((g) =>
+    const goalOrder = new Map(activeGoals.map((g, i) => [g.id, i]));
+    const entries = activeGoals.flatMap((g) =>
       (g.dailyQuests ?? []).map((quest) => ({
         goalId: g.id,
         goalTitle: g.title,
         quest,
       })),
     );
+    entries.sort((a, b) => {
+      const ao =
+        typeof a.quest.dayOrder === 'number' && Number.isFinite(a.quest.dayOrder)
+          ? a.quest.dayOrder
+          : 500;
+      const bo =
+        typeof b.quest.dayOrder === 'number' && Number.isFinite(b.quest.dayOrder)
+          ? b.quest.dayOrder
+          : 500;
+      if (ao !== bo) return ao - bo;
+      const gi = goalOrder.get(a.goalId) ?? 0;
+      const gj = goalOrder.get(b.goalId) ?? 0;
+      if (gi !== gj) return gi - gj;
+      return a.quest.id.localeCompare(b.quest.id);
+    });
+    return entries;
   }, [activeGoals]);
 
   const dailyQuests = useMemo(

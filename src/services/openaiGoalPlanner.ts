@@ -1,5 +1,13 @@
 import Constants from 'expo-constants';
 
+export type PlannerDailyQuest = {
+  title: string;
+  description: string;
+  points: number;
+  /** 0 = start of day, 999 = late evening / before bed; compared across all goals on the menu. */
+  dayOrder: number;
+};
+
 export type GoalPlannerFullResult = {
   specific: string;
   measurable: string;
@@ -7,7 +15,7 @@ export type GoalPlannerFullResult = {
   relevant: string;
   timeBound: string;
   checkpoints: Array<{ weekOffset: number; label: string }>;
-  dailyQuests: Array<{ title: string; description: string; points: number }>;
+  dailyQuests: PlannerDailyQuest[];
 };
 
 export type GoalPlannerBaseParams = {
@@ -71,6 +79,11 @@ function clampQuestCount(n: number): number {
   return Math.min(4, Math.max(2, Math.round(n)));
 }
 
+function clampDayOrder(n: number): number {
+  if (!Number.isFinite(n)) return 500;
+  return Math.min(999, Math.max(0, Math.round(n)));
+}
+
 function buildFullSystem(dailyQuestCount: number): string {
   const n = clampQuestCount(dailyQuestCount);
   return `You are a goal-planning coach. Reply with a single JSON object only (no markdown).
@@ -82,7 +95,7 @@ Fields:
 - timeBound: string (one clear sentence: deadline and horizon in plain language)
 - timeBoundCritique: string (one short honest critique of whether the deadline is realistic for the outcome; suggest adjustment if needed)
 - checkpoints: array of { "weekOffset": number, "label": string }. weekOffset is week number from start (1 = end of week 1). Space milestones evenly until the target date. label is the outcome for that week (no "Week N:" prefix).
-- dailyQuests: exactly ${n} objects { "title": string, "description": string, "points": number } with points between 10 and 25.
+- dailyQuests: exactly ${n} objects { "title": string, "description": string, "points": number, "dayOrder": number } with points between 10 and 25.
 
 Rules:
 - Use the user's title and description; make SMART fields concrete.
@@ -90,19 +103,21 @@ Rules:
 - If completedCheckpointCount is higher, increase difficulty and points modestly (still safe and actionable).
 - Checkpoints must align with the goal and deadline.
 - dailyQuests must be specific to this goal’s title and description (not generic self-help).
+- Each dailyQuest MUST include dayOrder: an integer 0–999 for when this action best fits in a typical waking day. The app sorts quests from ALL goals together by dayOrder ascending. Use low values for morning-style actions (e.g. jog, early focus block), mid values for afternoon, high values for evening or wind-down (e.g. reading before bed). Do not cluster every quest from one goal at the same number—spread them by what makes sense for each title. Still a concrete action—never “go to sleep” as a quest.
 - You MUST return exactly ${n} items in dailyQuests (no fewer, no more).`;
 }
 
 function buildRegenSystem(dailyQuestCount: number): string {
   const n = clampQuestCount(dailyQuestCount);
   return `You are a goal-planning coach. Reply with a single JSON object only: { "dailyQuests": [ ... ] }.
-dailyQuests must have exactly ${n} items: { "title", "description", "points" } with points 10–25.
+dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder" } with points 10–25 and dayOrder an integer 0–999.
 
 Rules:
 - Quests must support the user's goal and current milestones.
 - If completedCheckpointCount is 0, quests are VERY EASY.
 - Higher completedCheckpointCount means noticeably harder (longer or more demanding) daily actions, still realistic.
 - Each quest must be specific to this goal’s title and description (not generic advice).
+- Each quest MUST include dayOrder (0–999): lower = earlier in the day, higher = later; the menu merges quests from every goal and sorts by this value (e.g. morning run ≈ low, reading before bed ≈ high). Spread values to match each quest’s nature.
 - Return exactly ${n} quests (no fewer, no more).`;
 }
 
@@ -222,6 +237,7 @@ function parseFullResult(
   }
 
   const dailyQuests: GoalPlannerFullResult['dailyQuests'] = [];
+  let dqIndex = 0;
   for (const q of data.dailyQuests) {
     if (!isRecord(q)) continue;
     const title = q.title;
@@ -230,11 +246,20 @@ function parseFullResult(
     if (typeof title !== 'string' || !title.trim()) continue;
     if (typeof description !== 'string' || !description.trim()) continue;
     const pts = typeof points === 'number' ? clampPoints(points) : 12;
+    const defaultOrder =
+      n <= 1 ? 500 : Math.round((dqIndex / Math.max(n - 1, 1)) * 999);
+    const orderRaw = q.dayOrder;
+    const dayOrder =
+      typeof orderRaw === 'number' && Number.isFinite(orderRaw)
+        ? clampDayOrder(orderRaw)
+        : defaultOrder;
     dailyQuests.push({
       title: title.trim(),
       description: description.trim(),
       points: pts,
+      dayOrder,
     });
+    dqIndex += 1;
   }
 
   if (dailyQuests.length < n) {
@@ -264,16 +289,26 @@ function parseDailyOnly(
     throw new GoalPlannerError('Invalid dailyQuests-only response', 'bad_response');
   }
   const out: GoalPlannerFullResult['dailyQuests'] = [];
+  let dqIndex = 0;
   for (const q of data.dailyQuests) {
     if (!isRecord(q)) continue;
     if (typeof q.title !== 'string' || !q.title.trim()) continue;
     if (typeof q.description !== 'string' || !q.description.trim()) continue;
     const pts = typeof q.points === 'number' ? clampPoints(q.points) : 12;
+    const defaultOrder =
+      n <= 1 ? 500 : Math.round((dqIndex / Math.max(n - 1, 1)) * 999);
+    const orderRaw = q.dayOrder;
+    const dayOrder =
+      typeof orderRaw === 'number' && Number.isFinite(orderRaw)
+        ? clampDayOrder(orderRaw)
+        : defaultOrder;
     out.push({
       title: q.title.trim(),
       description: q.description.trim(),
       points: pts,
+      dayOrder,
     });
+    dqIndex += 1;
   }
   if (out.length < n) {
     throw new GoalPlannerError(

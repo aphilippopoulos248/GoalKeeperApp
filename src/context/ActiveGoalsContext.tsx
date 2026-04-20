@@ -47,12 +47,18 @@ function normalizeQuest(raw: unknown): Quest | null {
   const kind = o.kind;
   if (typeof points !== 'number' || !Number.isFinite(points)) return null;
   if (kind !== 'daily' && kind !== 'weekly') return null;
+  const dayOrderRaw = o.dayOrder;
+  const dayOrder =
+    typeof dayOrderRaw === 'number' && Number.isFinite(dayOrderRaw)
+      ? Math.min(999, Math.max(0, Math.round(dayOrderRaw)))
+      : undefined;
   return {
     id: o.id,
     title: o.title,
     description: o.description,
     points,
     kind,
+    ...(dayOrder !== undefined ? { dayOrder } : {}),
   };
 }
 
@@ -142,6 +148,7 @@ function enrichmentToDailyQuests(goalId: string, enrichment: GoalPlannerFullResu
     title: q.title,
     description: q.description,
     points: q.points,
+    dayOrder: q.dayOrder,
   }));
 }
 
@@ -269,6 +276,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
                   title: q.title,
                   description: q.description,
                   points: q.points,
+                  dayOrder: q.dayOrder,
                 })),
               };
             }),
@@ -347,6 +355,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
                         title: q.title,
                         description: q.description,
                         points: q.points,
+                        dayOrder: q.dayOrder,
                       })),
                     };
                   }),

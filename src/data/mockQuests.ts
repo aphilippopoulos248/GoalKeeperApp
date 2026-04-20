@@ -7,6 +7,7 @@ export const mockDailyQuests: Quest[] = [
     title: 'Morning focus block',
     description: 'Spend 25 minutes on your top milestone with no distractions.',
     points: 15,
+    dayOrder: 120,
   },
   {
     id: 'dq-2',
@@ -14,6 +15,7 @@ export const mockDailyQuests: Quest[] = [
     title: 'Log one win',
     description: 'Write a single sentence about progress you made today.',
     points: 10,
+    dayOrder: 480,
   },
   {
     id: 'dq-3',
@@ -21,6 +23,7 @@ export const mockDailyQuests: Quest[] = [
     title: 'Prep tomorrow',
     description: 'Pick the next tiny action you will take tomorrow.',
     points: 10,
+    dayOrder: 880,
   },
 ];
 
