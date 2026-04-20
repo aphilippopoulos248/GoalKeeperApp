@@ -2,17 +2,17 @@ import { DailyQuestProgressCard } from '../components/DailyQuestProgressCard';
 import { QuestSection } from '../components/QuestSection';
 import { Screen } from '../components/Screen';
 import { useQuestProgress } from '../context/QuestProgressContext';
-import { mockDailyQuests, mockWeeklyQuests } from '../data/mockQuests';
 import { useAppTheme } from '../theme/ThemeProvider';
 
 export function MenuScreen() {
   const { colors } = useAppTheme();
-  const { completed, toggleQuest, streak, pointsToday } = useQuestProgress();
+  const { completed, toggleQuest, streak, pointsToday, dailyQuests, weeklyQuests } =
+    useQuestProgress();
 
   return (
     <Screen>
       <DailyQuestProgressCard
-        dailyQuests={mockDailyQuests}
+        dailyQuests={dailyQuests}
         completed={completed}
         streak={streak}
         pointsToday={pointsToday}
@@ -21,13 +21,13 @@ export function MenuScreen() {
 
       <QuestSection
         title="Daily quests"
-        quests={mockDailyQuests}
+        quests={dailyQuests}
         completed={completed}
         onToggle={toggleQuest}
       />
       <QuestSection
         title="Weekly quests"
-        quests={mockWeeklyQuests}
+        quests={weeklyQuests}
         completed={completed}
         onToggle={toggleQuest}
       />

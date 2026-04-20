@@ -23,7 +23,10 @@ export interface Goal {
   achievable: string;
   relevant: string;
   timeBound: string;
+  /** ISO date string for the user-chosen deadline (used for AI refresh). */
+  targetDateIso?: string;
   checkpoints: Checkpoint[];
+  dailyQuests?: Quest[];
   completed: boolean;
 }
 

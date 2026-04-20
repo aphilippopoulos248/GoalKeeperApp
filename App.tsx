@@ -39,11 +39,11 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <QuestProgressProvider>
-            <ActiveGoalsProvider>
+          <ActiveGoalsProvider>
+            <QuestProgressProvider>
               <AppNavigation />
-            </ActiveGoalsProvider>
-          </QuestProgressProvider>
+            </QuestProgressProvider>
+          </ActiveGoalsProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

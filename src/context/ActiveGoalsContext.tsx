@@ -9,7 +9,9 @@ import React, {
 } from 'react';
 
 import { SEED_ACTIVE_GOALS } from '../data/mockGoal';
-import { Checkpoint, Goal } from '../types';
+import { regenerateDailyQuests } from '../services/openaiGoalPlanner';
+import type { GoalPlannerFullResult } from '../services/openaiGoalPlanner';
+import { Checkpoint, Goal, Quest } from '../types';
 
 const GOALS_STORAGE_KEY = '@goalkeeper/active-goals-v1';
 
@@ -19,13 +21,36 @@ export type NewGoalInput = {
   targetDate: Date;
 };
 
+export type AddGoalOptions = {
+  enrichment?: GoalPlannerFullResult;
+};
+
 type ActiveGoalsContextValue = {
   goals: Goal[];
-  addGoal: (input: NewGoalInput) => void;
+  addGoal: (input: NewGoalInput, options?: AddGoalOptions) => void;
   getGoalById: (id: string) => Goal | undefined;
+  toggleCheckpoint: (goalId: string, checkpointId: string) => void;
 };
 
 const ActiveGoalsContext = createContext<ActiveGoalsContextValue | null>(null);
+
+function normalizeQuest(raw: unknown): Quest | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.id !== 'string' || typeof o.title !== 'string') return null;
+  if (typeof o.description !== 'string') return null;
+  const points = o.points;
+  const kind = o.kind;
+  if (typeof points !== 'number' || !Number.isFinite(points)) return null;
+  if (kind !== 'daily' && kind !== 'weekly') return null;
+  return {
+    id: o.id,
+    title: o.title,
+    description: o.description,
+    points,
+    kind,
+  };
+}
 
 function normalizeCheckpoint(raw: unknown): Checkpoint | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -54,7 +79,16 @@ function normalizeGoal(raw: unknown): Goal | null {
     return null;
   }
   if (!Array.isArray(o.checkpoints)) return null;
-  const checkpoints = o.checkpoints.map(normalizeCheckpoint).filter((c): c is Checkpoint => c !== null);
+  const checkpoints = o.checkpoints
+    .map(normalizeCheckpoint)
+    .filter((c): c is Checkpoint => c !== null);
+
+  let dailyQuests: Quest[] | undefined;
+  if (Array.isArray(o.dailyQuests)) {
+    const dq = o.dailyQuests.map(normalizeQuest).filter((q): q is Quest => q !== null);
+    if (dq.length > 0) dailyQuests = dq;
+  }
+
   return {
     id: o.id,
     title: o.title,
@@ -64,7 +98,9 @@ function normalizeGoal(raw: unknown): Goal | null {
     achievable: o.achievable,
     relevant: o.relevant,
     timeBound: o.timeBound,
+    targetDateIso: typeof o.targetDateIso === 'string' ? o.targetDateIso : undefined,
     checkpoints,
+    dailyQuests,
     completed: typeof o.completed === 'boolean' ? o.completed : false,
   };
 }
@@ -86,31 +122,69 @@ async function saveGoalsToStorage(goals: Goal[]): Promise<void> {
   await AsyncStorage.setItem(GOALS_STORAGE_KEY, JSON.stringify(goals));
 }
 
-function buildGoalFromInput(input: NewGoalInput): Goal {
+function enrichmentToDailyQuests(goalId: string, enrichment: GoalPlannerFullResult): Quest[] {
+  return enrichment.dailyQuests.map((q, i) => ({
+    id: `${goalId}-ai-dq-${i + 1}`,
+    kind: 'daily' as const,
+    title: q.title,
+    description: q.description,
+    points: q.points,
+  }));
+}
+
+function enrichmentToCheckpoints(goalId: string, enrichment: GoalPlannerFullResult): Checkpoint[] {
+  return enrichment.checkpoints.map((c, i) => ({
+    id: `${goalId}-cp-${i + 1}`,
+    title: `Week ${c.weekOffset}: ${c.label}`,
+    done: false,
+  }));
+}
+
+function buildGoalFromInput(input: NewGoalInput, enrichment?: GoalPlannerFullResult): Goal {
   const id = `g-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const targetDateIso = input.targetDate.toISOString();
   const dateLabel = input.targetDate.toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   });
+
+  if (!enrichment) {
+    return {
+      id,
+      title: input.title.trim(),
+      description: input.description.trim(),
+      specific: input.description.trim(),
+      measurable:
+        'Define concrete metrics as you break this goal into smaller steps.',
+      achievable: 'Adjust scope if life gets busy—progress beats perfection.',
+      relevant: 'Tied to what matters to you right now.',
+      timeBound: `Achieve by ${dateLabel}.`,
+      targetDateIso,
+      completed: false,
+      checkpoints: [
+        {
+          id: `${id}-cp1`,
+          title: 'Define your first milestone',
+          done: false,
+        },
+      ],
+    };
+  }
+
   return {
     id,
     title: input.title.trim(),
     description: input.description.trim(),
-    specific: input.description.trim(),
-    measurable:
-      'Define concrete metrics as you break this goal into smaller steps.',
-    achievable: 'Adjust scope if life gets busy—progress beats perfection.',
-    relevant: 'Tied to what matters to you right now.',
-    timeBound: `Achieve by ${dateLabel}.`,
+    specific: enrichment.specific,
+    measurable: enrichment.measurable,
+    achievable: enrichment.achievable,
+    relevant: enrichment.relevant,
+    timeBound: enrichment.timeBound,
+    targetDateIso,
     completed: false,
-    checkpoints: [
-      {
-        id: `${id}-cp1`,
-        title: 'Define your first milestone',
-        done: false,
-      },
-    ],
+    checkpoints: enrichmentToCheckpoints(id, enrichment),
+    dailyQuests: enrichmentToDailyQuests(id, enrichment),
   };
 }
 
@@ -138,8 +212,8 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     void saveGoalsToStorage(goals);
   }, [goals, storageReady]);
 
-  const addGoal = useCallback((input: NewGoalInput) => {
-    setGoals((prev) => [buildGoalFromInput(input), ...prev]);
+  const addGoal = useCallback((input: NewGoalInput, options?: AddGoalOptions) => {
+    setGoals((prev) => [buildGoalFromInput(input, options?.enrichment), ...prev]);
   }, []);
 
   const getGoalById = useCallback(
@@ -147,9 +221,73 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     [goals],
   );
 
+  const toggleCheckpoint = useCallback((goalId: string, checkpointId: string) => {
+    setGoals((prev) => {
+      const oldGoal = prev.find((g) => g.id === goalId);
+      if (!oldGoal) return prev;
+
+      const cp = oldGoal.checkpoints.find((c) => c.id === checkpointId);
+      if (!cp) return prev;
+
+      const prevDoneCount = oldGoal.checkpoints.filter((c) => c.done).length;
+      const nextCheckpoints = oldGoal.checkpoints.map((c) =>
+        c.id === checkpointId ? { ...c, done: !c.done } : c,
+      );
+      const nextDoneCount = nextCheckpoints.filter((c) => c.done).length;
+
+      const nextGoals = prev.map((g) =>
+        g.id === goalId ? { ...g, checkpoints: nextCheckpoints } : g,
+      );
+
+      const markingComplete = !cp.done && nextDoneCount > prevDoneCount;
+
+      if (markingComplete) {
+        const updated = nextGoals.find((g) => g.id === goalId);
+        if (updated?.targetDateIso) {
+          const snapshot = { ...updated, checkpoints: nextCheckpoints };
+          queueMicrotask(() => {
+            void (async () => {
+              try {
+                const today = new Date();
+                const dailyQuestsRaw = await regenerateDailyQuests({
+                  title: snapshot.title,
+                  description: snapshot.description,
+                  targetDateIso: snapshot.targetDateIso!,
+                  todayIso: today.toISOString(),
+                  completedCheckpointCount: nextDoneCount,
+                  checkpointTitles: snapshot.checkpoints.map((c) => c.title),
+                });
+                const regenBatch = Date.now();
+                setGoals((cur) =>
+                  cur.map((g) => {
+                    if (g.id !== goalId) return g;
+                    return {
+                      ...g,
+                      dailyQuests: dailyQuestsRaw.map((q, i) => ({
+                        id: `${g.id}-ai-dq-${regenBatch}-${i + 1}`,
+                        kind: 'daily' as const,
+                        title: q.title,
+                        description: q.description,
+                        points: q.points,
+                      })),
+                    };
+                  }),
+                );
+              } catch {
+                // Non-blocking: keep existing quests on API failure
+              }
+            })();
+          });
+        }
+      }
+
+      return nextGoals;
+    });
+  }, []);
+
   const value = useMemo(
-    () => ({ goals, addGoal, getGoalById }),
-    [goals, addGoal, getGoalById],
+    () => ({ goals, addGoal, getGoalById, toggleCheckpoint }),
+    [goals, addGoal, getGoalById, toggleCheckpoint],
   );
 
   return (

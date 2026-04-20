@@ -8,14 +8,19 @@ import React, {
   useState,
 } from 'react';
 
-import { allMockQuests } from '../data/mockQuests';
+import { mockDailyQuests, mockWeeklyQuests } from '../data/mockQuests';
 import { useDailyStreakAndPointsToday } from '../hooks/useDailyStreakAndPointsToday';
+import type { Quest } from '../types';
+
+import { useActiveGoals } from './ActiveGoalsContext';
 
 const QUEST_COMPLETED_KEY = '@goalkeeper/quest-completed-v1';
 
 type QuestProgressValue = {
   completed: Record<string, boolean>;
   toggleQuest: (id: string) => void;
+  dailyQuests: Quest[];
+  weeklyQuests: Quest[];
   streak: number;
   pointsToday: number;
   lifetimeQuestPoints: number;
@@ -45,9 +50,24 @@ async function saveCompleted(map: Record<string, boolean>): Promise<void> {
 }
 
 export function QuestProgressProvider({ children }: { children: React.ReactNode }) {
+  const { goals } = useActiveGoals();
   const { streak, pointsToday, lifetimeQuestPoints, applyQuestToggle } =
     useDailyStreakAndPointsToday();
   const [completed, setCompleted] = useState<Record<string, boolean>>({});
+
+  const dailyQuests = useMemo(() => {
+    const g = goals.find(
+      (x) => !x.completed && x.dailyQuests != null && x.dailyQuests.length > 0,
+    );
+    return g?.dailyQuests ?? mockDailyQuests;
+  }, [goals]);
+
+  const weeklyQuests = mockWeeklyQuests;
+
+  const allQuestsForToggle = useMemo(
+    () => [...dailyQuests, ...weeklyQuests],
+    [dailyQuests, weeklyQuests],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -62,7 +82,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
 
   const toggleQuest = useCallback(
     (id: string) => {
-      const quest = allMockQuests.find((q) => q.id === id);
+      const quest = allQuestsForToggle.find((q) => q.id === id);
       if (!quest) return;
 
       setCompleted((prev) => {
@@ -75,7 +95,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
         return nextMap;
       });
     },
-    [applyQuestToggle],
+    [allQuestsForToggle, applyQuestToggle],
   );
 
   const questsCompletedCount = useMemo(
@@ -87,12 +107,23 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
     () => ({
       completed,
       toggleQuest,
+      dailyQuests,
+      weeklyQuests,
       streak,
       pointsToday,
       lifetimeQuestPoints,
       questsCompletedCount,
     }),
-    [completed, toggleQuest, streak, pointsToday, lifetimeQuestPoints, questsCompletedCount],
+    [
+      completed,
+      toggleQuest,
+      dailyQuests,
+      weeklyQuests,
+      streak,
+      pointsToday,
+      lifetimeQuestPoints,
+      questsCompletedCount,
+    ],
   );
 
   return (

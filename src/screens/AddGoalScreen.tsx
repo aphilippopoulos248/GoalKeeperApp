@@ -5,6 +5,8 @@ import DateTimePicker, {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Platform,
   Pressable,
   StyleSheet,
@@ -16,6 +18,7 @@ import {
 import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
+import { GoalPlannerError, planNewGoal } from '../services/openaiGoalPlanner';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 
@@ -28,6 +31,7 @@ export function AddGoalScreen({ navigation }: Props) {
   const [description, setDescription] = useState('');
   const [targetDate, setTargetDate] = useState(() => startOfTomorrow());
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const formattedDate = useMemo(
     () =>
@@ -62,17 +66,63 @@ export function AddGoalScreen({ navigation }: Props) {
   const canSubmit =
     title.trim().length > 0 && description.trim().length > 0;
 
+  const submitGoal = useCallback(
+    async (useAi: boolean) => {
+      if (!canSubmit) return;
+      const input = {
+        title: title.trim(),
+        description: description.trim(),
+        targetDate,
+      };
+
+      if (!useAi) {
+        addGoal(input);
+        navigation.popToTop();
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        const today = new Date();
+        const enrichment = await planNewGoal({
+          title: input.title,
+          description: input.description,
+          targetDateIso: input.targetDate.toISOString(),
+          todayIso: today.toISOString(),
+          completedCheckpointCount: 0,
+        });
+        addGoal(input, { enrichment });
+        navigation.popToTop();
+      } catch (err) {
+        const message =
+          err instanceof GoalPlannerError
+            ? err.message
+            : 'Something went wrong. Try again or save without AI.';
+        Alert.alert('Could not reach AI', message, [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Retry',
+            onPress: () => {
+              void submitGoal(true);
+            },
+          },
+          {
+            text: 'Save without AI',
+            onPress: () => {
+              void submitGoal(false);
+            },
+          },
+        ]);
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [addGoal, canSubmit, description, navigation, targetDate, title],
+  );
+
   const onAddToActive = useCallback(() => {
-    if (!canSubmit) {
-      return;
-    }
-    addGoal({
-      title: title.trim(),
-      description: description.trim(),
-      targetDate,
-    });
-    navigation.popToTop();
-  }, [addGoal, canSubmit, description, navigation, targetDate, title]);
+    void submitGoal(true);
+  }, [submitGoal]);
 
   return (
     <Screen>
@@ -194,23 +244,28 @@ export function AddGoalScreen({ navigation }: Props) {
         accessibilityRole="button"
         accessibilityLabel="Add to active goals"
         onPress={onAddToActive}
-        disabled={!canSubmit}
+        disabled={!canSubmit || submitting}
         style={({ pressed }) => [
           styles.submit,
           {
-            backgroundColor: canSubmit ? colors.primary : colors.border,
+            backgroundColor:
+              canSubmit && !submitting ? colors.primary : colors.border,
           },
-          pressed && canSubmit && { opacity: 0.9 },
+          pressed && canSubmit && !submitting && { opacity: 0.9 },
         ]}
       >
-        <Text
-          style={[
-            styles.submitLabel,
-            { color: canSubmit ? '#ffffff' : colors.textSecondary },
-          ]}
-        >
-          Add to active
-        </Text>
+        {submitting ? (
+          <ActivityIndicator color="#ffffff" />
+        ) : (
+          <Text
+            style={[
+              styles.submitLabel,
+              { color: canSubmit ? '#ffffff' : colors.textSecondary },
+            ]}
+          >
+            Add to active
+          </Text>
+        )}
       </Pressable>
     </Screen>
   );

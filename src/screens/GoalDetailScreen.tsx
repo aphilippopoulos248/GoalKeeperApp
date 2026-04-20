@@ -12,7 +12,7 @@ type Props = NativeStackScreenProps<GoalsStackParamList, 'GoalDetail'>;
 
 export function GoalDetailScreen({ route, navigation }: Props) {
   const { colors } = useAppTheme();
-  const { getGoalById } = useActiveGoals();
+  const { getGoalById, toggleCheckpoint } = useActiveGoals();
   const g = getGoalById(route.params.goalId);
 
   if (!g) {
@@ -74,14 +74,18 @@ export function GoalDetailScreen({ route, navigation }: Props) {
         </Text>
       ) : null}
       {g.checkpoints.map((c) => (
-        <View
+        <Pressable
           key={c.id}
-          style={[
+          accessibilityRole="button"
+          accessibilityLabel={`Checkpoint: ${c.title}. ${c.done ? 'Completed' : 'Not completed'}. Tap to toggle.`}
+          onPress={() => toggleCheckpoint(g.id, c.id)}
+          style={({ pressed }) => [
             styles.checkpoint,
             {
               backgroundColor: colors.surface,
               borderColor: colors.border,
             },
+            pressed && { opacity: 0.88 },
           ]}
         >
           <View
@@ -100,7 +104,7 @@ export function GoalDetailScreen({ route, navigation }: Props) {
           >
             {c.title}
           </Text>
-        </View>
+        </Pressable>
       ))}
 
       <View
@@ -114,8 +118,9 @@ export function GoalDetailScreen({ route, navigation }: Props) {
       >
         <Text style={[styles.aiTitle, { color: colors.text }]}>AI assist</Text>
         <Text style={[styles.aiBody, { color: colors.textSecondary }]}>
-          When connected, this panel will suggest next steps, rewrite fuzzy
-          goals into SMART form, and generate quests from your milestones.
+          {g.dailyQuests != null && g.dailyQuests.length > 0
+            ? 'Daily quests on the Menu tab are tied to this goal while it is your newest active goal with AI quests. Complete checkpoints to refresh quests with higher difficulty.'
+            : 'Add a goal with AI to fill SMART fields, checkpoints, and daily quests automatically.'}
         </Text>
       </View>
     </Screen>
