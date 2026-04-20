@@ -1,55 +1,39 @@
-import { useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
 
-import { Screen } from '../components/Screen';
+import { DailyQuestProgressCard } from '../components/DailyQuestProgressCard';
 import { QuestSection } from '../components/QuestSection';
+import { Screen } from '../components/Screen';
 import { mockDailyQuests, mockWeeklyQuests } from '../data/mockQuests';
+import { useDailyStreakAndPointsToday } from '../hooks/useDailyStreakAndPointsToday';
 import { useAppTheme } from '../theme/ThemeProvider';
-import { radius, spacing } from '../theme/spacing';
 
 const allQuests = [...mockDailyQuests, ...mockWeeklyQuests];
-
-function totalPointsForCompleted(
-  completed: Record<string, boolean>,
-): number {
-  return allQuests.reduce((sum, q) => {
-    if (completed[q.id]) return sum + q.points;
-    return sum;
-  }, 0);
-}
 
 export function MenuScreen() {
   const { colors } = useAppTheme();
   const [completed, setCompleted] = useState<Record<string, boolean>>({});
-
-  const score = useMemo(
-    () => totalPointsForCompleted(completed),
-    [completed],
-  );
+  const { streak, pointsToday, applyQuestToggle } = useDailyStreakAndPointsToday();
 
   const toggle = (id: string) => {
-    setCompleted((prev) => ({ ...prev, [id]: !prev[id] }));
+    const quest = allQuests.find((q) => q.id === id);
+    if (!quest) return;
+
+    setCompleted((prev) => {
+      const nextCompleted = !prev[id];
+      queueMicrotask(() => applyQuestToggle(quest, nextCompleted));
+      return { ...prev, [id]: nextCompleted };
+    });
   };
 
   return (
     <Screen>
-      <View
-        style={[
-          styles.scoreCard,
-          {
-            backgroundColor: colors.surfaceElevated,
-            borderColor: colors.border,
-          },
-        ]}
-      >
-        <Text style={[styles.scoreLabel, { color: colors.textSecondary }]}>
-          Score
-        </Text>
-        <Text style={[styles.scoreValue, { color: colors.text }]}>{score}</Text>
-        <Text style={[styles.scoreHint, { color: colors.textSecondary }]}>
-          Points from completed quests update instantly.
-        </Text>
-      </View>
+      <DailyQuestProgressCard
+        dailyQuests={mockDailyQuests}
+        completed={completed}
+        streak={streak}
+        pointsToday={pointsToday}
+        colors={colors}
+      />
 
       <QuestSection
         title="Daily quests"
@@ -66,29 +50,3 @@ export function MenuScreen() {
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  scoreCard: {
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-  },
-  scoreLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: spacing.xs,
-  },
-  scoreValue: {
-    fontSize: 36,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-  },
-  scoreHint: {
-    marginTop: spacing.sm,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-});
