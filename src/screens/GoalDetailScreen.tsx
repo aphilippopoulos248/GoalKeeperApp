@@ -66,7 +66,7 @@ export function GoalDetailScreen({ route, navigation }: Props) {
       </View>
 
       <Text style={[styles.sectionTitle, { color: colors.text }]}>
-        Checkpoints
+        Milestones
       </Text>
       {g.checkpoints.length === 0 ? (
         <Text style={[styles.emptyCheckpoints, { color: colors.textSecondary }]}>
