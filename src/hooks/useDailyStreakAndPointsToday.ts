@@ -1,0 +1,145 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useCallback, useEffect, useState } from 'react';
+
+import type { Quest } from '../types';
+
+const STREAK_KEY = '@goalkeeper/daily-streak-v1';
+const POINTS_TODAY_KEY = '@goalkeeper/points-today-v1';
+
+type StreakPersisted = {
+  streak: number;
+  lastDailyActivityDate: string | null;
+};
+
+type PointsPersisted = {
+  date: string;
+  points: number;
+};
+
+function formatLocalDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function yesterdayString(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return formatLocalDate(d);
+}
+
+async function loadStreak(): Promise<StreakPersisted> {
+  try {
+    const raw = await AsyncStorage.getItem(STREAK_KEY);
+    if (!raw) return { streak: 0, lastDailyActivityDate: null };
+    const parsed = JSON.parse(raw) as StreakPersisted;
+    return {
+      streak: typeof parsed.streak === 'number' ? parsed.streak : 0,
+      lastDailyActivityDate:
+        typeof parsed.lastDailyActivityDate === 'string' ||
+        parsed.lastDailyActivityDate === null
+          ? parsed.lastDailyActivityDate
+          : null,
+    };
+  } catch {
+    return { streak: 0, lastDailyActivityDate: null };
+  }
+}
+
+async function saveStreak(data: StreakPersisted): Promise<void> {
+  await AsyncStorage.setItem(STREAK_KEY, JSON.stringify(data));
+}
+
+async function loadPointsToday(): Promise<PointsPersisted> {
+  try {
+    const raw = await AsyncStorage.getItem(POINTS_TODAY_KEY);
+    if (!raw) return { date: formatLocalDate(new Date()), points: 0 };
+    const parsed = JSON.parse(raw) as PointsPersisted;
+    return {
+      date: typeof parsed.date === 'string' ? parsed.date : formatLocalDate(new Date()),
+      points: typeof parsed.points === 'number' ? parsed.points : 0,
+    };
+  } catch {
+    return { date: formatLocalDate(new Date()), points: 0 };
+  }
+}
+
+async function savePointsToday(data: PointsPersisted): Promise<void> {
+  await AsyncStorage.setItem(POINTS_TODAY_KEY, JSON.stringify(data));
+}
+
+function normalizePointsForToday(stored: PointsPersisted): PointsPersisted {
+  const today = formatLocalDate(new Date());
+  if (stored.date !== today) {
+    return { date: today, points: 0 };
+  }
+  return stored;
+}
+
+export function useDailyStreakAndPointsToday() {
+  const [streak, setStreak] = useState(0);
+  const [pointsToday, setPointsToday] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [s, p] = await Promise.all([loadStreak(), loadPointsToday()]);
+      if (cancelled) return;
+      setStreak(s.streak);
+      const normalized = normalizePointsForToday(p);
+      setPointsToday(normalized.points);
+      if (normalized.points !== p.points || normalized.date !== p.date) {
+        await savePointsToday(normalized);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const applyQuestToggle = useCallback((quest: Quest, nowCompleted: boolean) => {
+    const today = formatLocalDate(new Date());
+
+    void (async () => {
+      if (nowCompleted) {
+        const ptsData = normalizePointsForToday(await loadPointsToday());
+        const nextPoints = ptsData.points + quest.points;
+        setPointsToday(nextPoints);
+        await savePointsToday({ date: today, points: nextPoints });
+
+        if (quest.kind !== 'daily') return;
+
+        const cur = await loadStreak();
+        const last = cur.lastDailyActivityDate;
+
+        if (last === today) {
+          return;
+        }
+
+        let nextStreak: number;
+        if (last === null) {
+          nextStreak = 1;
+        } else if (last === yesterdayString()) {
+          nextStreak = cur.streak + 1;
+        } else {
+          nextStreak = 1;
+        }
+
+        const next: StreakPersisted = {
+          streak: nextStreak,
+          lastDailyActivityDate: today,
+        };
+        await saveStreak(next);
+        setStreak(nextStreak);
+      } else {
+        const ptsData = normalizePointsForToday(await loadPointsToday());
+        const nextPoints = Math.max(0, ptsData.points - quest.points);
+        setPointsToday(nextPoints);
+        await savePointsToday({ date: today, points: nextPoints });
+      }
+    })();
+  }, []);
+
+  return { streak, pointsToday, applyQuestToggle };
+}
