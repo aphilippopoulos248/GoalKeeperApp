@@ -9,6 +9,7 @@ import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { useQuestProgress } from '../context/QuestProgressContext';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
+import { dailyQuestCountForPriority } from '../utils/goalPriority';
 
 function hashString(s: string): number {
   let h = 2166136261;
@@ -64,7 +65,12 @@ export function MenuScreen() {
   );
 
   const awaitingAiQuests = useMemo(
-    () => goals.some((g) => !g.completed && (g.dailyQuests?.length ?? 0) < 2),
+    () =>
+      goals.some((g) => {
+        if (g.completed) return false;
+        const expected = dailyQuestCountForPriority(g.priority ?? 'medium');
+        return (g.dailyQuests?.length ?? 0) < expected;
+      }),
     [goals],
   );
 

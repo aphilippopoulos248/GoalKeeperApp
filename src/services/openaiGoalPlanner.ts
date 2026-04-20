@@ -16,6 +16,8 @@ export type GoalPlannerBaseParams = {
   targetDateIso: string;
   todayIso: string;
   completedCheckpointCount: number;
+  /** Number of daily quests to generate (2–4), from goal priority. */
+  dailyQuestCount: number;
 };
 
 export type RegenerateDailyQuestsParams = GoalPlannerBaseParams & {
@@ -62,6 +64,46 @@ function getApiKey(): string {
 function clampPoints(n: number): number {
   if (!Number.isFinite(n)) return 12;
   return Math.min(25, Math.max(10, Math.round(n)));
+}
+
+function clampQuestCount(n: number): number {
+  if (!Number.isFinite(n)) return 3;
+  return Math.min(4, Math.max(2, Math.round(n)));
+}
+
+function buildFullSystem(dailyQuestCount: number): string {
+  const n = clampQuestCount(dailyQuestCount);
+  return `You are a goal-planning coach. Reply with a single JSON object only (no markdown).
+Fields:
+- specific: string (refined SMART Specific)
+- measurable: string (SMART Measurable)
+- achievable: string (SMART Achievable — short, realistic)
+- relevant: string (SMART Relevant)
+- timeBound: string (one clear sentence: deadline and horizon in plain language)
+- timeBoundCritique: string (one short honest critique of whether the deadline is realistic for the outcome; suggest adjustment if needed)
+- checkpoints: array of { "weekOffset": number, "label": string }. weekOffset is week number from start (1 = end of week 1). Space milestones evenly until the target date. label is the outcome for that week (no "Week N:" prefix).
+- dailyQuests: exactly ${n} objects { "title": string, "description": string, "points": number } with points between 10 and 25.
+
+Rules:
+- Use the user's title and description; make SMART fields concrete.
+- If completedCheckpointCount is 0, daily quests must be VERY EASY (5–15 min, low friction).
+- If completedCheckpointCount is higher, increase difficulty and points modestly (still safe and actionable).
+- Checkpoints must align with the goal and deadline.
+- dailyQuests must be specific to this goal’s title and description (not generic self-help).
+- You MUST return exactly ${n} items in dailyQuests (no fewer, no more).`;
+}
+
+function buildRegenSystem(dailyQuestCount: number): string {
+  const n = clampQuestCount(dailyQuestCount);
+  return `You are a goal-planning coach. Reply with a single JSON object only: { "dailyQuests": [ ... ] }.
+dailyQuests must have exactly ${n} items: { "title", "description", "points" } with points 10–25.
+
+Rules:
+- Quests must support the user's goal and current milestones.
+- If completedCheckpointCount is 0, quests are VERY EASY.
+- Higher completedCheckpointCount means noticeably harder (longer or more demanding) daily actions, still realistic.
+- Each quest must be specific to this goal’s title and description (not generic advice).
+- Return exactly ${n} quests (no fewer, no more).`;
 }
 
 async function postChatJson(system: string, user: string): Promise<unknown> {
@@ -128,7 +170,11 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
-function parseFullResult(data: unknown): GoalPlannerFullResult {
+function parseFullResult(
+  data: unknown,
+  dailyQuestCount: number,
+): GoalPlannerFullResult {
+  const n = clampQuestCount(dailyQuestCount);
   if (!isRecord(data)) {
     throw new GoalPlannerError('Invalid JSON shape', 'bad_response');
   }
@@ -191,8 +237,11 @@ function parseFullResult(data: unknown): GoalPlannerFullResult {
     });
   }
 
-  if (dailyQuests.length < 2) {
-    throw new GoalPlannerError('Expected at least 2 daily quests', 'bad_response');
+  if (dailyQuests.length < n) {
+    throw new GoalPlannerError(
+      `Expected at least ${n} daily quests`,
+      'bad_response',
+    );
   }
 
   return {
@@ -202,11 +251,15 @@ function parseFullResult(data: unknown): GoalPlannerFullResult {
     relevant: (data.relevant as string).trim(),
     timeBound,
     checkpoints,
-    dailyQuests: dailyQuests.slice(0, 2),
+    dailyQuests: dailyQuests.slice(0, n),
   };
 }
 
-function parseDailyOnly(data: unknown): GoalPlannerFullResult['dailyQuests'] {
+function parseDailyOnly(
+  data: unknown,
+  dailyQuestCount: number,
+): GoalPlannerFullResult['dailyQuests'] {
+  const n = clampQuestCount(dailyQuestCount);
   if (!isRecord(data) || !Array.isArray(data.dailyQuests)) {
     throw new GoalPlannerError('Invalid dailyQuests-only response', 'bad_response');
   }
@@ -222,57 +275,36 @@ function parseDailyOnly(data: unknown): GoalPlannerFullResult['dailyQuests'] {
       points: pts,
     });
   }
-  if (out.length < 2) {
-    throw new GoalPlannerError('Expected at least 2 daily quests', 'bad_response');
+  if (out.length < n) {
+    throw new GoalPlannerError(
+      `Expected at least ${n} daily quests`,
+      'bad_response',
+    );
   }
-  return out.slice(0, 2);
+  return out.slice(0, n);
 }
-
-const FULL_SYSTEM = `You are a goal-planning coach. Reply with a single JSON object only (no markdown).
-Fields:
-- specific: string (refined SMART Specific)
-- measurable: string (SMART Measurable)
-- achievable: string (SMART Achievable — short, realistic)
-- relevant: string (SMART Relevant)
-- timeBound: string (one clear sentence: deadline and horizon in plain language)
-- timeBoundCritique: string (one short honest critique of whether the deadline is realistic for the outcome; suggest adjustment if needed)
-- checkpoints: array of { "weekOffset": number, "label": string }. weekOffset is week number from start (1 = end of week 1). Space milestones evenly until the target date. label is the outcome for that week (no "Week N:" prefix).
-- dailyQuests: exactly 2 objects { "title": string, "description": string, "points": number } with points between 10 and 25.
-
-Rules:
-- Use the user's title and description; make SMART fields concrete.
-- If completedCheckpointCount is 0, daily quests must be VERY EASY (5–15 min, low friction).
-- If completedCheckpointCount is higher, increase difficulty and points modestly (still safe and actionable).
-- Checkpoints must align with the goal and deadline.
-- dailyQuests must be specific to this goal’s title and description (not generic self-help).`;
-
-const REGEN_SYSTEM = `You are a goal-planning coach. Reply with a single JSON object only: { "dailyQuests": [ ... ] }.
-dailyQuests must have exactly 2 items: { "title", "description", "points" } with points 10–25.
-
-Rules:
-- Quests must support the user's goal and current milestones.
-- If completedCheckpointCount is 0, quests are VERY EASY.
-- Higher completedCheckpointCount means noticeably harder (longer or more demanding) daily actions, still realistic.
-- Each quest must be specific to this goal’s title and description (not generic advice).`;
 
 export async function planNewGoal(
   params: GoalPlannerBaseParams,
 ): Promise<GoalPlannerFullResult> {
+  const dailyQuestCount = clampQuestCount(params.dailyQuestCount);
   const user = JSON.stringify({
     title: params.title,
     description: params.description,
     targetDateIso: params.targetDateIso,
     todayIso: params.todayIso,
     completedCheckpointCount: params.completedCheckpointCount,
+    dailyQuestCount,
   });
 
-  const data = await postChatJson(FULL_SYSTEM, user);
-  return parseFullResult(data);
+  const data = await postChatJson(buildFullSystem(dailyQuestCount), user);
+  return parseFullResult(data, dailyQuestCount);
 }
 
 export async function regenerateDailyQuests(
   params: RegenerateDailyQuestsParams,
 ): Promise<GoalPlannerFullResult['dailyQuests']> {
+  const dailyQuestCount = clampQuestCount(params.dailyQuestCount);
   const user = JSON.stringify({
     title: params.title,
     description: params.description,
@@ -280,8 +312,9 @@ export async function regenerateDailyQuests(
     todayIso: params.todayIso,
     completedCheckpointCount: params.completedCheckpointCount,
     checkpointTitles: params.checkpointTitles,
+    dailyQuestCount,
   });
 
-  const data = await postChatJson(REGEN_SYSTEM, user);
-  return parseDailyOnly(data);
+  const data = await postChatJson(buildRegenSystem(dailyQuestCount), user);
+  return parseDailyOnly(data, dailyQuestCount);
 }

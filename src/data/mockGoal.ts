@@ -12,6 +12,7 @@ export const SEED_ACTIVE_GOALS: Goal[] = [
     achievable: 'Start from walk/run intervals; increase volume slowly.',
     relevant: 'Supports long-term health and energy for work.',
     timeBound: 'Race day in 10 weeks; longest run milestone at week 8.',
+    priority: 'medium',
     completed: false,
     checkpoints: [
       { id: 'c1', title: 'Week 2: 15 min continuous jog', done: true },
@@ -30,6 +31,7 @@ export const SEED_ACTIVE_GOALS: Goal[] = [
     achievable: 'Minimum 20 minutes per day; audiobooks count.',
     relevant: 'Reduces screen time before bed and expands perspective.',
     timeBound: '12 books by December 31; quarterly check-ins.',
+    priority: 'medium',
     completed: false,
     checkpoints: [
       { id: 'g2-c1', title: 'Q1: Finish 3 books', done: true },

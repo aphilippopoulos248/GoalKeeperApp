@@ -12,7 +12,8 @@ import React, {
 import { SEED_ACTIVE_GOALS } from '../data/mockGoal';
 import { regenerateDailyQuests } from '../services/openaiGoalPlanner';
 import type { GoalPlannerFullResult } from '../services/openaiGoalPlanner';
-import { Checkpoint, Goal, Quest } from '../types';
+import { Checkpoint, Goal, GoalPriority, Quest } from '../types';
+import { dailyQuestCountForPriority, parseGoalPriority } from '../utils/goalPriority';
 
 const GOALS_STORAGE_KEY = '@goalkeeper/active-goals-v1';
 
@@ -20,6 +21,7 @@ export type NewGoalInput = {
   title: string;
   description: string;
   targetDate: Date;
+  priority: GoalPriority;
 };
 
 export type AddGoalOptions = {
@@ -101,6 +103,7 @@ function normalizeGoal(raw: unknown): Goal | null {
     relevant: o.relevant,
     timeBound: o.timeBound,
     targetDateIso: typeof o.targetDateIso === 'string' ? o.targetDateIso : undefined,
+    priority: parseGoalPriority(o.priority),
     checkpoints,
     dailyQuests,
     completed: typeof o.completed === 'boolean' ? o.completed : false,
@@ -171,6 +174,7 @@ function buildGoalFromInput(input: NewGoalInput, enrichment?: GoalPlannerFullRes
       relevant: 'Tied to what matters to you right now.',
       timeBound: `Achieve by ${dateLabel}.`,
       targetDateIso,
+      priority: input.priority,
       completed: false,
       checkpoints: [
         {
@@ -192,6 +196,7 @@ function buildGoalFromInput(input: NewGoalInput, enrichment?: GoalPlannerFullRes
     relevant: enrichment.relevant,
     timeBound: enrichment.timeBound,
     targetDateIso,
+    priority: input.priority,
     completed: false,
     checkpoints: enrichmentToCheckpoints(id, enrichment),
     dailyQuests: enrichmentToDailyQuests(id, enrichment),
@@ -227,7 +232,8 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     if (!storageReady) return;
     for (const g of goals) {
       if (g.completed) continue;
-      if (g.dailyQuests != null && g.dailyQuests.length >= 2) continue;
+      const expectedCount = dailyQuestCountForPriority(parseGoalPriority(g.priority));
+      if (g.dailyQuests != null && g.dailyQuests.length >= expectedCount) continue;
       if (dailyQuestBackfillInFlight.current.has(g.id)) continue;
       dailyQuestBackfillInFlight.current.add(g.id);
       const snapshot = g;
@@ -235,6 +241,9 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
         try {
           const today = new Date();
           const completedCheckpointCount = snapshot.checkpoints.filter((c) => c.done).length;
+          const questCount = dailyQuestCountForPriority(
+            parseGoalPriority(snapshot.priority),
+          );
           const dailyQuestsRaw = await regenerateDailyQuests({
             title: snapshot.title,
             description: snapshot.description,
@@ -242,12 +251,16 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
             todayIso: today.toISOString(),
             completedCheckpointCount,
             checkpointTitles: snapshot.checkpoints.map((c) => c.title),
+            dailyQuestCount: questCount,
           });
           const regenBatch = Date.now();
           setGoals((cur) =>
             cur.map((goal) => {
               if (goal.id !== snapshot.id) return goal;
-              if (goal.dailyQuests != null && goal.dailyQuests.length >= 2) return goal;
+              const need = dailyQuestCountForPriority(parseGoalPriority(goal.priority));
+              if (goal.dailyQuests != null && goal.dailyQuests.length >= need) {
+                return goal;
+              }
               return {
                 ...goal,
                 dailyQuests: dailyQuestsRaw.map((q, i) => ({
@@ -310,6 +323,9 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
             void (async () => {
               try {
                 const today = new Date();
+                const questCount = dailyQuestCountForPriority(
+                  parseGoalPriority(snapshot.priority),
+                );
                 const dailyQuestsRaw = await regenerateDailyQuests({
                   title: snapshot.title,
                   description: snapshot.description,
@@ -317,6 +333,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
                   todayIso: today.toISOString(),
                   completedCheckpointCount: nextDoneCount,
                   checkpointTitles: snapshot.checkpoints.map((c) => c.title),
+                  dailyQuestCount: questCount,
                 });
                 const regenBatch = Date.now();
                 setGoals((cur) =>

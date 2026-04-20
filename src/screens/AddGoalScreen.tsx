@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, {
   DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
+import { Picker } from '@react-native-picker/picker';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useMemo, useState } from 'react';
 import {
@@ -19,8 +20,10 @@ import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
 import { GoalPlannerError, planNewGoal } from '../services/openaiGoalPlanner';
+import type { GoalPriority } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
+import { dailyQuestCountForPriority } from '../utils/goalPriority';
 
 type Props = NativeStackScreenProps<GoalsStackParamList, 'AddGoal'>;
 
@@ -31,6 +34,7 @@ export function AddGoalScreen({ navigation }: Props) {
   const [description, setDescription] = useState('');
   const [targetDate, setTargetDate] = useState(() => startOfTomorrow());
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [priority, setPriority] = useState<GoalPriority>('medium');
   const [submitting, setSubmitting] = useState(false);
 
   const formattedDate = useMemo(
@@ -73,6 +77,7 @@ export function AddGoalScreen({ navigation }: Props) {
         title: title.trim(),
         description: description.trim(),
         targetDate,
+        priority,
       };
 
       if (!useAi) {
@@ -90,6 +95,7 @@ export function AddGoalScreen({ navigation }: Props) {
           targetDateIso: input.targetDate.toISOString(),
           todayIso: today.toISOString(),
           completedCheckpointCount: 0,
+          dailyQuestCount: dailyQuestCountForPriority(input.priority),
         });
         addGoal(input, { enrichment });
         navigation.popToTop();
@@ -117,7 +123,7 @@ export function AddGoalScreen({ navigation }: Props) {
         setSubmitting(false);
       }
     },
-    [addGoal, canSubmit, description, navigation, targetDate, title],
+    [addGoal, canSubmit, description, navigation, priority, targetDate, title],
   );
 
   const onAddToActive = useCallback(() => {
@@ -176,6 +182,31 @@ export function AddGoalScreen({ navigation }: Props) {
           },
         ]}
       />
+
+      <Text style={[styles.label, { color: colors.textSecondary }]}>
+        Priority
+      </Text>
+      <View
+        style={[
+          styles.priorityPickerWrap,
+          {
+            backgroundColor: colors.surfaceElevated,
+            borderColor: colors.border,
+          },
+        ]}
+      >
+        <Picker
+          selectedValue={priority}
+          onValueChange={(v) => setPriority(v as GoalPriority)}
+          style={[styles.priorityPicker, { color: colors.text }]}
+          mode={Platform.OS === 'android' ? 'dropdown' : undefined}
+          dropdownIconColor={colors.textSecondary}
+        >
+          <Picker.Item label="Low" value="low" color={colors.text} />
+          <Picker.Item label="Medium" value="medium" color={colors.text} />
+          <Picker.Item label="High" value="high" color={colors.text} />
+        </Picker>
+      </View>
 
       <Text style={[styles.label, { color: colors.textSecondary }]}>
         Target date
@@ -313,6 +344,15 @@ const styles = StyleSheet.create({
   inputMultiline: {
     minHeight: 100,
     paddingTop: spacing.sm + 2,
+  },
+  priorityPickerWrap: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    marginBottom: spacing.md,
+    overflow: 'hidden',
+  },
+  priorityPicker: {
+    marginVertical: -4,
   },
   dateField: {
     flexDirection: 'row',

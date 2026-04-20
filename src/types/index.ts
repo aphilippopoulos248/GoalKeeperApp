@@ -1,3 +1,5 @@
+export type GoalPriority = 'low' | 'medium' | 'high';
+
 export type QuestKind = 'daily' | 'weekly';
 
 export interface Quest {
@@ -25,6 +27,8 @@ export interface Goal {
   timeBound: string;
   /** ISO date string for the user-chosen deadline (used for AI refresh). */
   targetDateIso?: string;
+  /** Drives daily quest count on the Menu (2 / 3 / 4). Defaults to medium when missing. */
+  priority?: GoalPriority;
   checkpoints: Checkpoint[];
   dailyQuests?: Quest[];
   completed: boolean;
