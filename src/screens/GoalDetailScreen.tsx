@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
@@ -12,7 +12,7 @@ type Props = NativeStackScreenProps<GoalsStackParamList, 'GoalDetail'>;
 
 export function GoalDetailScreen({ route, navigation }: Props) {
   const { colors } = useAppTheme();
-  const { getGoalById, toggleCheckpoint } = useActiveGoals();
+  const { getGoalById, removeGoal, toggleCheckpoint } = useActiveGoals();
   const g = getGoalById(route.params.goalId);
 
   if (!g) {
@@ -123,6 +123,37 @@ export function GoalDetailScreen({ route, navigation }: Props) {
             : 'Add a goal with AI to fill SMART fields, checkpoints, and daily quests automatically.'}
         </Text>
       </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Remove this goal"
+        onPress={() =>
+          Alert.alert(
+            '',
+            'Are you sure you want to remove this goal?',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Yes',
+                style: 'destructive',
+                onPress: () => {
+                  removeGoal(g.id);
+                  navigation.popToTop();
+                },
+              },
+            ],
+          )
+        }
+        style={({ pressed }) => [
+          styles.removeButton,
+          {
+            borderColor: '#ef4444',
+          },
+          pressed && { opacity: 0.85 },
+        ]}
+      >
+        <Text style={styles.removeButtonLabel}>Remove goal</Text>
+      </Pressable>
     </Screen>
   );
 }
@@ -228,5 +259,18 @@ const styles = StyleSheet.create({
   aiBody: {
     fontSize: 14,
     lineHeight: 20,
+  },
+  removeButton: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.lg,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
+  removeButtonLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#ef4444',
   },
 });

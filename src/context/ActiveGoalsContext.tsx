@@ -29,6 +29,7 @@ type ActiveGoalsContextValue = {
   goals: Goal[];
   addGoal: (input: NewGoalInput, options?: AddGoalOptions) => void;
   getGoalById: (id: string) => Goal | undefined;
+  removeGoal: (goalId: string) => void;
   toggleCheckpoint: (goalId: string, checkpointId: string) => void;
 };
 
@@ -221,6 +222,10 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     [goals],
   );
 
+  const removeGoal = useCallback((goalId: string) => {
+    setGoals((prev) => prev.filter((g) => g.id !== goalId));
+  }, []);
+
   const toggleCheckpoint = useCallback((goalId: string, checkpointId: string) => {
     setGoals((prev) => {
       const oldGoal = prev.find((g) => g.id === goalId);
@@ -286,8 +291,8 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const value = useMemo(
-    () => ({ goals, addGoal, getGoalById, toggleCheckpoint }),
-    [goals, addGoal, getGoalById, toggleCheckpoint],
+    () => ({ goals, addGoal, getGoalById, removeGoal, toggleCheckpoint }),
+    [goals, addGoal, getGoalById, removeGoal, toggleCheckpoint],
   );
 
   return (
