@@ -243,7 +243,8 @@ Rules:
 - Use the user's title and description; make SMART fields concrete.
 - If completedCheckpointCount is 0, daily quests must be VERY EASY (5–15 min, low friction).
 - If completedCheckpointCount is higher, increase difficulty and points modestly (still safe and actionable).
-- Checkpoints must align with the goal and deadline.`;
+- Checkpoints must align with the goal and deadline.
+- dailyQuests must be specific to this goal’s title and description (not generic self-help).`;
 
 const REGEN_SYSTEM = `You are a goal-planning coach. Reply with a single JSON object only: { "dailyQuests": [ ... ] }.
 dailyQuests must have exactly 2 items: { "title", "description", "points" } with points 10–25.
@@ -251,7 +252,8 @@ dailyQuests must have exactly 2 items: { "title", "description", "points" } with
 Rules:
 - Quests must support the user's goal and current milestones.
 - If completedCheckpointCount is 0, quests are VERY EASY.
-- Higher completedCheckpointCount means noticeably harder (longer or more demanding) daily actions, still realistic.`;
+- Higher completedCheckpointCount means noticeably harder (longer or more demanding) daily actions, still realistic.
+- Each quest must be specific to this goal’s title and description (not generic advice).`;
 
 export async function planNewGoal(
   params: GoalPlannerBaseParams,

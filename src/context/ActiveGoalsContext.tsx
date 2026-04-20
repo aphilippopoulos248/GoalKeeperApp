@@ -5,6 +5,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -123,6 +124,14 @@ async function saveGoalsToStorage(goals: Goal[]): Promise<void> {
   await AsyncStorage.setItem(GOALS_STORAGE_KEY, JSON.stringify(goals));
 }
 
+/** Used for AI calls when the goal has no stored deadline (e.g. seed data). */
+function effectiveTargetDateIso(goal: Pick<Goal, 'targetDateIso'>): string {
+  if (goal.targetDateIso?.trim()) return goal.targetDateIso;
+  const d = new Date();
+  d.setDate(d.getDate() + 90);
+  return d.toISOString();
+}
+
 function enrichmentToDailyQuests(goalId: string, enrichment: GoalPlannerFullResult): Quest[] {
   return enrichment.dailyQuests.map((q, i) => ({
     id: `${goalId}-ai-dq-${i + 1}`,
@@ -192,6 +201,7 @@ function buildGoalFromInput(input: NewGoalInput, enrichment?: GoalPlannerFullRes
 export function ActiveGoalsProvider({ children }: { children: React.ReactNode }) {
   const [goals, setGoals] = useState<Goal[]>(() => [...SEED_ACTIVE_GOALS]);
   const [storageReady, setStorageReady] = useState(false);
+  const dailyQuestBackfillInFlight = useRef(new Set<string>());
 
   useEffect(() => {
     let cancelled = false;
@@ -211,6 +221,52 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     if (!storageReady) return;
     void saveGoalsToStorage(goals);
+  }, [goals, storageReady]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    for (const g of goals) {
+      if (g.completed) continue;
+      if (g.dailyQuests != null && g.dailyQuests.length >= 2) continue;
+      if (dailyQuestBackfillInFlight.current.has(g.id)) continue;
+      dailyQuestBackfillInFlight.current.add(g.id);
+      const snapshot = g;
+      void (async () => {
+        try {
+          const today = new Date();
+          const completedCheckpointCount = snapshot.checkpoints.filter((c) => c.done).length;
+          const dailyQuestsRaw = await regenerateDailyQuests({
+            title: snapshot.title,
+            description: snapshot.description,
+            targetDateIso: effectiveTargetDateIso(snapshot),
+            todayIso: today.toISOString(),
+            completedCheckpointCount,
+            checkpointTitles: snapshot.checkpoints.map((c) => c.title),
+          });
+          const regenBatch = Date.now();
+          setGoals((cur) =>
+            cur.map((goal) => {
+              if (goal.id !== snapshot.id) return goal;
+              if (goal.dailyQuests != null && goal.dailyQuests.length >= 2) return goal;
+              return {
+                ...goal,
+                dailyQuests: dailyQuestsRaw.map((q, i) => ({
+                  id: `${goal.id}-ai-dq-${regenBatch}-${i + 1}`,
+                  kind: 'daily' as const,
+                  title: q.title,
+                  description: q.description,
+                  points: q.points,
+                })),
+              };
+            }),
+          );
+        } catch {
+          // Non-blocking: same as checkpoint regen
+        } finally {
+          dailyQuestBackfillInFlight.current.delete(snapshot.id);
+        }
+      })();
+    }
   }, [goals, storageReady]);
 
   const addGoal = useCallback((input: NewGoalInput, options?: AddGoalOptions) => {
@@ -248,7 +304,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
 
       if (markingComplete) {
         const updated = nextGoals.find((g) => g.id === goalId);
-        if (updated?.targetDateIso) {
+        if (updated) {
           const snapshot = { ...updated, checkpoints: nextCheckpoints };
           queueMicrotask(() => {
             void (async () => {
@@ -257,7 +313,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
                 const dailyQuestsRaw = await regenerateDailyQuests({
                   title: snapshot.title,
                   description: snapshot.description,
-                  targetDateIso: snapshot.targetDateIso!,
+                  targetDateIso: effectiveTargetDateIso(snapshot),
                   todayIso: today.toISOString(),
                   completedCheckpointCount: nextDoneCount,
                   checkpointTitles: snapshot.checkpoints.map((c) => c.title),

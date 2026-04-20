@@ -9,21 +9,32 @@ type QuestRowProps = {
   quest: Quest;
   completed: boolean;
   onToggle: () => void;
+  /** Use inside GoalQuestCard-style wrapper (no outer border; transparent body). */
+  variant?: 'default' | 'inCard';
 };
 
-export function QuestRow({ quest, completed, onToggle }: QuestRowProps) {
+export function QuestRow({
+  quest,
+  completed,
+  onToggle,
+  variant = 'default',
+}: QuestRowProps) {
   const { colors } = useAppTheme();
+  const isInCard = variant === 'inCard';
 
   return (
     <Pressable
       onPress={onToggle}
       style={({ pressed }) => [
-        styles.row,
-        {
+        isInCard ? styles.rowInCard : styles.row,
+        !isInCard && {
           backgroundColor: colors.surfaceElevated,
           borderColor: colors.border,
-          opacity: pressed ? 0.92 : 1,
         },
+        isInCard && {
+          backgroundColor: 'transparent',
+        },
+        { opacity: pressed ? 0.92 : 1 },
       ]}
       accessibilityRole="checkbox"
       accessibilityState={{ checked: completed }}
@@ -62,6 +73,13 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     marginBottom: spacing.sm,
+    gap: spacing.md,
+  },
+  rowInCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: spacing.md,
+    paddingTop: spacing.sm + 2,
     gap: spacing.md,
   },
   checkbox: {

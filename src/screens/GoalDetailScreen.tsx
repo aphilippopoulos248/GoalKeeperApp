@@ -119,8 +119,8 @@ export function GoalDetailScreen({ route, navigation }: Props) {
         <Text style={[styles.aiTitle, { color: colors.text }]}>AI assist</Text>
         <Text style={[styles.aiBody, { color: colors.textSecondary }]}>
           {g.dailyQuests != null && g.dailyQuests.length > 0
-            ? 'Daily quests on the Menu tab are tied to this goal while it is your newest active goal with AI quests. Complete checkpoints to refresh quests with higher difficulty.'
-            : 'Add a goal with AI to fill SMART fields, checkpoints, and daily quests automatically.'}
+            ? 'The Menu tab lists daily quests for every active goal (in random order). Yours include two AI quests for this goal. Completing checkpoints here refreshes this goal’s pair with higher difficulty as you progress.'
+            : 'Add a goal with AI to fill SMART fields, checkpoints, and daily quests automatically, or wait while the app generates quests for goals that do not have them yet.'}
         </Text>
       </View>
 

@@ -16,10 +16,17 @@ import { useActiveGoals } from './ActiveGoalsContext';
 
 const QUEST_COMPLETED_KEY = '@goalkeeper/quest-completed-v1';
 
+export type DailyQuestEntry = {
+  goalId: string;
+  goalTitle: string;
+  quest: Quest;
+};
+
 type QuestProgressValue = {
   completed: Record<string, boolean>;
   toggleQuest: (id: string) => void;
   dailyQuests: Quest[];
+  dailyQuestEntries: DailyQuestEntry[];
   weeklyQuests: Quest[];
   streak: number;
   pointsToday: number;
@@ -55,12 +62,29 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
     useDailyStreakAndPointsToday();
   const [completed, setCompleted] = useState<Record<string, boolean>>({});
 
-  const dailyQuests = useMemo(() => {
-    const g = goals.find(
-      (x) => !x.completed && x.dailyQuests != null && x.dailyQuests.length > 0,
+  const activeGoals = useMemo(() => goals.filter((g) => !g.completed), [goals]);
+
+  const dailyQuestEntries = useMemo((): DailyQuestEntry[] => {
+    if (activeGoals.length === 0) {
+      return mockDailyQuests.map((quest) => ({
+        goalId: '',
+        goalTitle: 'Daily',
+        quest,
+      }));
+    }
+    return activeGoals.flatMap((g) =>
+      (g.dailyQuests ?? []).map((quest) => ({
+        goalId: g.id,
+        goalTitle: g.title,
+        quest,
+      })),
     );
-    return g?.dailyQuests ?? mockDailyQuests;
-  }, [goals]);
+  }, [activeGoals]);
+
+  const dailyQuests = useMemo(
+    () => dailyQuestEntries.map((e) => e.quest),
+    [dailyQuestEntries],
+  );
 
   const weeklyQuests = mockWeeklyQuests;
 
@@ -108,6 +132,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
       completed,
       toggleQuest,
       dailyQuests,
+      dailyQuestEntries,
       weeklyQuests,
       streak,
       pointsToday,
@@ -118,6 +143,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
       completed,
       toggleQuest,
       dailyQuests,
+      dailyQuestEntries,
       weeklyQuests,
       streak,
       pointsToday,
