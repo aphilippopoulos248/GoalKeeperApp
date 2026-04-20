@@ -27,6 +27,7 @@ export function AddGoalScreen({ navigation }: Props) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [targetDate, setTargetDate] = useState(() => startOfTomorrow());
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const formattedDate = useMemo(
     () =>
@@ -39,7 +40,18 @@ export function AddGoalScreen({ navigation }: Props) {
   );
 
   const onDateChange = useCallback(
-    (_event: DateTimePickerEvent, date?: Date) => {
+    (event: DateTimePickerEvent, date?: Date) => {
+      if (Platform.OS === 'android') {
+        if (event.type === 'dismissed') {
+          setPickerOpen(false);
+          return;
+        }
+        if (date) {
+          setTargetDate(date);
+        }
+        setPickerOpen(false);
+        return;
+      }
       if (date) {
         setTargetDate(date);
       }
@@ -118,26 +130,65 @@ export function AddGoalScreen({ navigation }: Props) {
       <Text style={[styles.label, { color: colors.textSecondary }]}>
         Target date
       </Text>
-      <Text style={[styles.dateSummary, { color: colors.text }]}>
-        {formattedDate}
-      </Text>
-      <View
-        style={[
-          styles.pickerWrap,
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Choose target date"
+        onPress={() => setPickerOpen(true)}
+        style={({ pressed }) => [
+          styles.dateField,
           {
             backgroundColor: colors.surfaceElevated,
             borderColor: colors.border,
           },
+          pressed && { opacity: 0.88 },
         ]}
       >
+        <Text style={[styles.dateFieldText, { color: colors.text }]}>
+          {formattedDate}
+        </Text>
+        <Ionicons name="calendar-outline" size={22} color={colors.primary} />
+      </Pressable>
+
+      {pickerOpen && Platform.OS === 'android' ? (
         <DateTimePicker
           value={targetDate}
           mode="date"
-          display={Platform.OS === 'ios' ? 'inline' : 'calendar'}
+          display="default"
           onChange={onDateChange}
           themeVariant={mode === 'dark' ? 'dark' : 'light'}
         />
-      </View>
+      ) : null}
+
+      {pickerOpen && Platform.OS !== 'android' ? (
+        <View
+          style={[
+            styles.pickerWrap,
+            {
+              backgroundColor: colors.surfaceElevated,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <DateTimePicker
+            value={targetDate}
+            mode="date"
+            display="inline"
+            onChange={onDateChange}
+            themeVariant={mode === 'dark' ? 'dark' : 'light'}
+          />
+          <Pressable
+            onPress={() => setPickerOpen(false)}
+            style={({ pressed }) => [
+              styles.doneRow,
+              pressed && { opacity: 0.8 },
+            ]}
+          >
+            <Text style={[styles.doneLabel, { color: colors.primary }]}>
+              Done
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <Pressable
         accessibilityRole="button"
@@ -208,16 +259,35 @@ const styles = StyleSheet.create({
     minHeight: 100,
     paddingTop: spacing.sm + 2,
   },
-  dateSummary: {
+  dateField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    marginBottom: spacing.md,
+  },
+  dateFieldText: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: spacing.sm,
+    flex: 1,
   },
   pickerWrap: {
     borderRadius: radius.md,
     borderWidth: 1,
     overflow: 'hidden',
     marginBottom: spacing.lg,
+  },
+  doneRow: {
+    alignItems: 'flex-end',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  doneLabel: {
+    fontSize: 16,
+    fontWeight: '700',
   },
   submit: {
     borderRadius: radius.lg,
