@@ -1,5 +1,7 @@
 import Constants from 'expo-constants';
 
+import type { MilestoneFrequency } from '../types';
+
 export type PlannerDailyQuest = {
   title: string;
   description: string;
@@ -26,6 +28,8 @@ export type GoalPlannerBaseParams = {
   completedCheckpointCount: number;
   /** Number of daily quests to generate (2–4), from goal priority. */
   dailyQuestCount: number;
+  /** Milestone spacing for checkpoints; defaults to weekly when omitted. */
+  milestoneFrequency?: MilestoneFrequency;
 };
 
 export type RegenerateDailyQuestsParams = GoalPlannerBaseParams & {
@@ -178,8 +182,24 @@ function normalizeDailyQuestDayOrders(quests: PlannerDailyQuest[]): PlannerDaily
   });
 }
 
-function buildFullSystem(dailyQuestCount: number): string {
+function checkpointSpacingInstruction(freq: MilestoneFrequency): string {
+  switch (freq) {
+    case 'biweekly':
+      return `Milestone frequency is BI-WEEKLY: use weekOffset 2, 4, 6, … only (every two weeks from the start) through the target date. Space milestones evenly on that cadence. Do not use odd week numbers for checkpoints.`;
+    case 'monthly':
+      return `Milestone frequency is MONTHLY: use weekOffset 4, 8, 12, … only (approximately every four weeks) through the target date. Space milestones evenly on that cadence.`;
+    case 'weekly':
+    default:
+      return `Milestone frequency is WEEKLY: use weekOffset 1, 2, 3, … (consecutive weeks from the start) through the target date. Space milestones evenly—one checkpoint per week.`;
+  }
+}
+
+function buildFullSystem(
+  dailyQuestCount: number,
+  milestoneFrequency: MilestoneFrequency,
+): string {
   const n = clampQuestCount(dailyQuestCount);
+  const checkpointCadence = checkpointSpacingInstruction(milestoneFrequency);
   return `You are a goal-planning coach. Reply with a single JSON object only (no markdown).
 Fields:
 - specific: string (refined SMART Specific)
@@ -188,14 +208,13 @@ Fields:
 - relevant: string (SMART Relevant)
 - timeBound: string (one clear sentence: deadline and horizon in plain language)
 - timeBoundCritique: string (one short honest critique of whether the deadline is realistic for the outcome; suggest adjustment if needed)
-- checkpoints: array of { "weekOffset": number, "label": string }. weekOffset is week number from start (1 = end of week 1). Space milestones evenly until the target date. label is the outcome for that week (no "Week N:" prefix).
-- dailyQuests: exactly ${n} objects { "title": string, "description": string, "points": number, "dayOrder": number } with points between 10 and 25.
+- checkpoints: array of { "weekOffset": number, "label": string }. weekOffset is the week number from the start (1 = end of week 1). ${checkpointCadence} label is the outcome for that period (no "Week N:" prefix).
 
 Rules:
 - Use the user's title and description; make SMART fields concrete.
 - If completedCheckpointCount is 0, daily quests must be VERY EASY (5–15 min, low friction).
 - If completedCheckpointCount is higher, increase difficulty and points modestly (still safe and actionable).
-- Checkpoints must align with the goal and deadline.
+- Checkpoints must align with the goal, deadline, and milestoneFrequency from the user message.
 - dailyQuests must be specific to this goal’s title and description (not generic self-help).
 - Each dailyQuest MUST include dayOrder: integer 0–999. The app sorts ALL goals’ quests by dayOrder ascending (lower = earlier on the Menu, higher = later).
 - dayOrder bands (follow strictly): morning / wake / breakfast → 0–199; lunch / midday / noon → 200–449; afternoon → 450–649; evening / night / before bed / wind-down → 750–999. Spread multiple quests across the right band; do not reuse the same integer for every quest.
@@ -211,6 +230,7 @@ function buildRegenSystem(dailyQuestCount: number): string {
 dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder" } with points 10–25 and dayOrder an integer 0–999.
 
 Rules:
+- The user message includes milestoneFrequency (weekly / biweekly / monthly). Align daily quest pacing and tone with that milestone cadence (e.g. smaller steps for weekly checkpoints vs monthly).
 - Quests must support the user's goal and current milestones.
 - If completedCheckpointCount is 0, quests are VERY EASY.
 - Higher completedCheckpointCount means noticeably harder (longer or more demanding) daily actions, still realistic.
@@ -284,6 +304,89 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+/** Models sometimes omit `title`/`description` or use alternate keys; coerce finite numbers. */
+const DAILY_QUEST_TITLE_KEYS = [
+  'title',
+  'Title',
+  'name',
+  'Name',
+  'label',
+  'task',
+  'questTitle',
+  'summary',
+  'headline',
+  'action',
+] as const;
+
+const DAILY_QUEST_DESC_KEYS = [
+  'description',
+  'details',
+  'body',
+  'desc',
+  'instruction',
+  'instructions',
+  'text',
+  'content',
+  'Content',
+  'note',
+  'notes',
+] as const;
+
+/** Flat string, number, or one-level nested object with common text keys (models often nest). */
+function coerceQuestText(v: unknown): string | undefined {
+  if (typeof v === 'string' && v.trim()) return v.trim();
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  if (isRecord(v)) {
+    const innerKeys = [
+      'text',
+      'content',
+      'title',
+      'description',
+      'body',
+      'label',
+      'value',
+      'name',
+      'message',
+    ] as const;
+    for (const ik of innerKeys) {
+      const inner = v[ik];
+      if (typeof inner === 'string' && inner.trim()) return inner.trim();
+      if (typeof inner === 'number' && Number.isFinite(inner)) return String(inner);
+    }
+  }
+  return undefined;
+}
+
+function pickQuestField(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): string | undefined {
+  for (const key of keys) {
+    const coerced = coerceQuestText(record[key]);
+    if (coerced) return coerced;
+  }
+  return undefined;
+}
+
+/** If only one of title/description exists, derive the other so we still accept the row. */
+function pairTitleDescription(
+  title: string | undefined,
+  description: string | undefined,
+): { title: string; description: string } | undefined {
+  if (title && description) return { title, description };
+  if (!title && description) {
+    const line = description.split('\n')[0]?.trim() ?? description;
+    return {
+      title: line.slice(0, 120) || 'Daily quest',
+      description,
+    };
+  }
+  if (title && !description) {
+    return { title, description: title };
+  }
+  return undefined;
+}
+
 function parseFullResult(
   data: unknown,
   dailyQuestCount: number,
@@ -338,12 +441,18 @@ function parseFullResult(
   const dailyQuests: GoalPlannerFullResult['dailyQuests'] = [];
   let dqIndex = 0;
   for (const q of data.dailyQuests) {
-    if (!isRecord(q)) continue;
-    const title = q.title;
-    const description = q.description;
+    if (!isRecord(q)) {
+      continue;
+    }
+    let title = pickQuestField(q, DAILY_QUEST_TITLE_KEYS);
+    let description = pickQuestField(q, DAILY_QUEST_DESC_KEYS);
+    const paired = pairTitleDescription(title, description);
+    if (!paired) {
+      continue;
+    }
+    title = paired.title;
+    description = paired.description;
     const points = q.points;
-    if (typeof title !== 'string' || !title.trim()) continue;
-    if (typeof description !== 'string' || !description.trim()) continue;
     const pts = typeof points === 'number' ? clampPoints(points) : 12;
     const defaultOrder =
       n <= 1 ? 500 : Math.round((dqIndex / Math.max(n - 1, 1)) * 999);
@@ -353,8 +462,8 @@ function parseFullResult(
         ? clampDayOrder(orderRaw)
         : defaultOrder;
     dailyQuests.push({
-      title: title.trim(),
-      description: description.trim(),
+      title,
+      description,
       points: pts,
       dayOrder,
     });
@@ -393,8 +502,12 @@ function parseDailyOnly(
   let dqIndex = 0;
   for (const q of data.dailyQuests) {
     if (!isRecord(q)) continue;
-    if (typeof q.title !== 'string' || !q.title.trim()) continue;
-    if (typeof q.description !== 'string' || !q.description.trim()) continue;
+    let title = pickQuestField(q, DAILY_QUEST_TITLE_KEYS);
+    let description = pickQuestField(q, DAILY_QUEST_DESC_KEYS);
+    const paired = pairTitleDescription(title, description);
+    if (!paired) continue;
+    title = paired.title;
+    description = paired.description;
     const pts = typeof q.points === 'number' ? clampPoints(q.points) : 12;
     const defaultOrder =
       n <= 1 ? 500 : Math.round((dqIndex / Math.max(n - 1, 1)) * 999);
@@ -404,8 +517,8 @@ function parseDailyOnly(
         ? clampDayOrder(orderRaw)
         : defaultOrder;
     out.push({
-      title: q.title.trim(),
-      description: q.description.trim(),
+      title,
+      description,
       points: pts,
       dayOrder,
     });
@@ -424,6 +537,7 @@ export async function planNewGoal(
   params: GoalPlannerBaseParams,
 ): Promise<GoalPlannerFullResult> {
   const dailyQuestCount = clampQuestCount(params.dailyQuestCount);
+  const milestoneFrequency = params.milestoneFrequency ?? 'weekly';
   const user = JSON.stringify({
     title: params.title,
     description: params.description,
@@ -431,9 +545,13 @@ export async function planNewGoal(
     todayIso: params.todayIso,
     completedCheckpointCount: params.completedCheckpointCount,
     dailyQuestCount,
+    milestoneFrequency,
   });
 
-  const data = await postChatJson(buildFullSystem(dailyQuestCount), user);
+  const data = await postChatJson(
+    buildFullSystem(dailyQuestCount, milestoneFrequency),
+    user,
+  );
   return parseFullResult(data, dailyQuestCount);
 }
 
@@ -441,6 +559,7 @@ export async function regenerateDailyQuests(
   params: RegenerateDailyQuestsParams,
 ): Promise<GoalPlannerFullResult['dailyQuests']> {
   const dailyQuestCount = clampQuestCount(params.dailyQuestCount);
+  const milestoneFrequency = params.milestoneFrequency ?? 'weekly';
   const user = JSON.stringify({
     title: params.title,
     description: params.description,
@@ -449,6 +568,7 @@ export async function regenerateDailyQuests(
     completedCheckpointCount: params.completedCheckpointCount,
     checkpointTitles: params.checkpointTitles,
     dailyQuestCount,
+    milestoneFrequency,
   });
 
   const data = await postChatJson(buildRegenSystem(dailyQuestCount), user);

@@ -12,7 +12,13 @@ import React, {
 import { SEED_ACTIVE_GOALS } from '../data/mockGoal';
 import { regenerateDailyQuests } from '../services/openaiGoalPlanner';
 import type { GoalPlannerFullResult } from '../services/openaiGoalPlanner';
-import { Checkpoint, Goal, GoalPriority, Quest } from '../types';
+import {
+  Checkpoint,
+  Goal,
+  GoalPriority,
+  MilestoneFrequency,
+  Quest,
+} from '../types';
 import { dailyQuestCountForPriority, parseGoalPriority } from '../utils/goalPriority';
 
 const GOALS_STORAGE_KEY = '@goalkeeper/active-goals-v1';
@@ -22,6 +28,7 @@ export type NewGoalInput = {
   description: string;
   targetDate: Date;
   priority: GoalPriority;
+  milestoneFrequency: MilestoneFrequency;
 };
 
 export type AddGoalOptions = {
@@ -37,6 +44,13 @@ type ActiveGoalsContextValue = {
 };
 
 const ActiveGoalsContext = createContext<ActiveGoalsContextValue | null>(null);
+
+function parseMilestoneFrequency(raw: unknown): MilestoneFrequency {
+  if (raw === 'weekly' || raw === 'biweekly' || raw === 'monthly') {
+    return raw;
+  }
+  return 'weekly';
+}
 
 function normalizeQuest(raw: unknown): Quest | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -110,6 +124,7 @@ function normalizeGoal(raw: unknown): Goal | null {
     timeBound: o.timeBound,
     targetDateIso: typeof o.targetDateIso === 'string' ? o.targetDateIso : undefined,
     priority: parseGoalPriority(o.priority),
+    milestoneFrequency: parseMilestoneFrequency(o.milestoneFrequency),
     checkpoints,
     dailyQuests,
     completed: typeof o.completed === 'boolean' ? o.completed : false,
@@ -182,6 +197,7 @@ function buildGoalFromInput(input: NewGoalInput, enrichment?: GoalPlannerFullRes
       timeBound: `Achieve by ${dateLabel}.`,
       targetDateIso,
       priority: input.priority,
+      milestoneFrequency: input.milestoneFrequency,
       completed: false,
       checkpoints: [
         {
@@ -204,6 +220,7 @@ function buildGoalFromInput(input: NewGoalInput, enrichment?: GoalPlannerFullRes
     timeBound: enrichment.timeBound,
     targetDateIso,
     priority: input.priority,
+    milestoneFrequency: input.milestoneFrequency,
     completed: false,
     checkpoints: enrichmentToCheckpoints(id, enrichment),
     dailyQuests: enrichmentToDailyQuests(id, enrichment),
@@ -259,6 +276,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
             completedCheckpointCount,
             checkpointTitles: snapshot.checkpoints.map((c) => c.title),
             dailyQuestCount: questCount,
+            milestoneFrequency: parseMilestoneFrequency(snapshot.milestoneFrequency),
           });
           const regenBatch = Date.now();
           setGoals((cur) =>
@@ -342,6 +360,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
                   completedCheckpointCount: nextDoneCount,
                   checkpointTitles: snapshot.checkpoints.map((c) => c.title),
                   dailyQuestCount: questCount,
+                  milestoneFrequency: parseMilestoneFrequency(snapshot.milestoneFrequency),
                 });
                 const regenBatch = Date.now();
                 setGoals((cur) =>

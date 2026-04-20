@@ -1,5 +1,8 @@
 export type GoalPriority = 'low' | 'medium' | 'high';
 
+/** How often milestones/checkpoints are spaced for a goal. */
+export type MilestoneFrequency = 'weekly' | 'biweekly' | 'monthly';
+
 export type QuestKind = 'daily' | 'weekly';
 
 export interface Quest {
@@ -34,6 +37,8 @@ export interface Goal {
   targetDateIso?: string;
   /** Drives daily quest count on the Menu (2 / 3 / 4). Defaults to medium when missing. */
   priority?: GoalPriority;
+  /** Milestone spacing; defaults to weekly when missing (legacy goals). */
+  milestoneFrequency?: MilestoneFrequency;
   checkpoints: Checkpoint[];
   dailyQuests?: Quest[];
   completed: boolean;

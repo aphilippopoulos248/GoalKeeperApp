@@ -20,7 +20,7 @@ import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
 import { GoalPlannerError, planNewGoal } from '../services/openaiGoalPlanner';
-import type { GoalPriority } from '../types';
+import type { GoalPriority, MilestoneFrequency } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 import { dailyQuestCountForPriority } from '../utils/goalPriority';
@@ -35,6 +35,8 @@ export function AddGoalScreen({ navigation }: Props) {
   const [targetDate, setTargetDate] = useState(() => startOfTomorrow());
   const [pickerOpen, setPickerOpen] = useState(false);
   const [priority, setPriority] = useState<GoalPriority>('medium');
+  const [milestoneFrequency, setMilestoneFrequency] =
+    useState<MilestoneFrequency>('weekly');
   const [submitting, setSubmitting] = useState(false);
 
   const formattedDate = useMemo(
@@ -78,6 +80,7 @@ export function AddGoalScreen({ navigation }: Props) {
         description: description.trim(),
         targetDate,
         priority,
+        milestoneFrequency,
       };
 
       if (!useAi) {
@@ -96,6 +99,7 @@ export function AddGoalScreen({ navigation }: Props) {
           todayIso: today.toISOString(),
           completedCheckpointCount: 0,
           dailyQuestCount: dailyQuestCountForPriority(input.priority),
+          milestoneFrequency: input.milestoneFrequency,
         });
         addGoal(input, { enrichment });
         navigation.popToTop();
@@ -123,7 +127,16 @@ export function AddGoalScreen({ navigation }: Props) {
         setSubmitting(false);
       }
     },
-    [addGoal, canSubmit, description, navigation, priority, targetDate, title],
+    [
+      addGoal,
+      canSubmit,
+      description,
+      milestoneFrequency,
+      navigation,
+      priority,
+      targetDate,
+      title,
+    ],
   );
 
   const onAddToActive = useCallback(() => {
@@ -205,6 +218,31 @@ export function AddGoalScreen({ navigation }: Props) {
           <Picker.Item label="Low" value="low" color={colors.text} />
           <Picker.Item label="Medium" value="medium" color={colors.text} />
           <Picker.Item label="High" value="high" color={colors.text} />
+        </Picker>
+      </View>
+
+      <Text style={[styles.label, { color: colors.textSecondary }]}>
+        Milestone frequency
+      </Text>
+      <View
+        style={[
+          styles.priorityPickerWrap,
+          {
+            backgroundColor: colors.surfaceElevated,
+            borderColor: colors.border,
+          },
+        ]}
+      >
+        <Picker
+          selectedValue={milestoneFrequency}
+          onValueChange={(v) => setMilestoneFrequency(v as MilestoneFrequency)}
+          style={[styles.priorityPicker, { color: colors.text }]}
+          mode={Platform.OS === 'android' ? 'dropdown' : undefined}
+          dropdownIconColor={colors.textSecondary}
+        >
+          <Picker.Item label="Weekly" value="weekly" color={colors.text} />
+          <Picker.Item label="Bi-Weekly" value="biweekly" color={colors.text} />
+          <Picker.Item label="Monthly" value="monthly" color={colors.text} />
         </Picker>
       </View>
 
