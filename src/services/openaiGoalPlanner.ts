@@ -84,6 +84,100 @@ function clampDayOrder(n: number): number {
   return Math.min(999, Math.max(0, Math.round(n)));
 }
 
+/** Lower = earlier in day; 4 = unknown (sort by model dayOrder among unknowns). */
+type TimeOfDayRank = 0 | 1 | 2 | 3 | 4;
+
+function textMatchesAny(haystack: string, needles: readonly string[]): boolean {
+  return needles.some((w) => haystack.includes(w));
+}
+
+function inferTimeOfDayRank(title: string, description: string): TimeOfDayRank {
+  const t = `${title} ${description}`.toLowerCase();
+  let r = -1;
+  if (
+    textMatchesAny(t, [
+      'morning',
+      'wake',
+      'waking',
+      'after waking',
+      'breakfast',
+      'sunrise',
+      'early',
+      'before noon',
+    ])
+  ) {
+    r = Math.max(r, 0);
+  }
+  if (textMatchesAny(t, ['lunch', 'noon', 'midday'])) {
+    r = Math.max(r, 1);
+  }
+  if (textMatchesAny(t, ['afternoon', 'after work', 'after school'])) {
+    r = Math.max(r, 2);
+  }
+  if (
+    textMatchesAny(t, [
+      'evening',
+      'night',
+      'tonight',
+      'before bed',
+      'bedtime',
+      'wind-down',
+      'wind down',
+      'sunset',
+      'dusk',
+    ])
+  ) {
+    r = Math.max(r, 3);
+  }
+  return (r === -1 ? 4 : r) as TimeOfDayRank;
+}
+
+const DAY_ORDER_BAND: Record<Exclude<TimeOfDayRank, 4>, { lo: number; hi: number }> = {
+  0: { lo: 0, hi: 199 },
+  1: { lo: 200, hi: 449 },
+  2: { lo: 450, hi: 649 },
+  3: { lo: 750, hi: 999 },
+};
+
+/** Re-sort each AI batch by time-of-day cues, then assign dayOrder inside prompt bands (cross-goal safe). */
+function normalizeDailyQuestDayOrders(quests: PlannerDailyQuest[]): PlannerDailyQuest[] {
+  if (quests.length === 0) return [];
+  const scored = quests.map((q, originalIndex) => ({
+    q,
+    originalIndex,
+    rank: inferTimeOfDayRank(q.title, q.description),
+  }));
+  scored.sort((a, b) => {
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    if (a.q.dayOrder !== b.q.dayOrder) return a.q.dayOrder - b.q.dayOrder;
+    const tc = a.q.title.localeCompare(b.q.title);
+    if (tc !== 0) return tc;
+    return a.originalIndex - b.originalIndex;
+  });
+
+  const byRank = new Map<TimeOfDayRank, typeof scored>();
+  for (const s of scored) {
+    const arr = byRank.get(s.rank) ?? [];
+    arr.push(s);
+    byRank.set(s.rank, arr);
+  }
+
+  return scored.map((s) => {
+    if (s.rank === 4) {
+      return { ...s.q, dayOrder: clampDayOrder(s.q.dayOrder) };
+    }
+    const band = DAY_ORDER_BAND[s.rank];
+    const group = byRank.get(s.rank)!;
+    const idx = group.indexOf(s);
+    const gLen = group.length;
+    const dayOrder =
+      gLen === 1
+        ? Math.round((band.lo + band.hi) / 2)
+        : Math.round(band.lo + (idx / (gLen - 1)) * (band.hi - band.lo));
+    return { ...s.q, dayOrder };
+  });
+}
+
 function buildFullSystem(dailyQuestCount: number): string {
   const n = clampQuestCount(dailyQuestCount);
   return `You are a goal-planning coach. Reply with a single JSON object only (no markdown).
@@ -103,7 +197,11 @@ Rules:
 - If completedCheckpointCount is higher, increase difficulty and points modestly (still safe and actionable).
 - Checkpoints must align with the goal and deadline.
 - dailyQuests must be specific to this goal’s title and description (not generic self-help).
-- Each dailyQuest MUST include dayOrder: an integer 0–999 for when this action best fits in a typical waking day. The app sorts quests from ALL goals together by dayOrder ascending. Use low values for morning-style actions (e.g. jog, early focus block), mid values for afternoon, high values for evening or wind-down (e.g. reading before bed). Do not cluster every quest from one goal at the same number—spread them by what makes sense for each title. Still a concrete action—never “go to sleep” as a quest.
+- Each dailyQuest MUST include dayOrder: integer 0–999. The app sorts ALL goals’ quests by dayOrder ascending (lower = earlier on the Menu, higher = later).
+- dayOrder bands (follow strictly): morning / wake / breakfast → 0–199; lunch / midday / noon → 200–449; afternoon → 450–649; evening / night / before bed / wind-down → 750–999. Spread multiple quests across the right band; do not reuse the same integer for every quest.
+- Hard rule: if title or description clearly means morning or right after waking, dayOrder MUST be ≤199. If it clearly means evening or before bed, dayOrder MUST be ≥750.
+- Example for 3 quests: a morning habit ≈120, a lunch-related task ≈350, an evening wind-down ≈900.
+- Still a concrete action—never “go to sleep” as a quest.
 - You MUST return exactly ${n} items in dailyQuests (no fewer, no more).`;
 }
 
@@ -117,7 +215,8 @@ Rules:
 - If completedCheckpointCount is 0, quests are VERY EASY.
 - Higher completedCheckpointCount means noticeably harder (longer or more demanding) daily actions, still realistic.
 - Each quest must be specific to this goal’s title and description (not generic advice).
-- Each quest MUST include dayOrder (0–999): lower = earlier in the day, higher = later; the menu merges quests from every goal and sorts by this value (e.g. morning run ≈ low, reading before bed ≈ high). Spread values to match each quest’s nature.
+- Each quest MUST include dayOrder 0–999; the Menu sorts all goals’ quests ascending (morning first, evening last).
+- Bands: morning/wake/breakfast → 0–199; lunch/midday/noon → 200–449; afternoon → 450–649; evening/night/before bed/wind-down → 750–999. Morning cues → dayOrder ≤199; evening/bedtime cues → dayOrder ≥750. Example triple: ≈120, ≈350, ≈900.
 - Return exactly ${n} quests (no fewer, no more).`;
 }
 
@@ -140,7 +239,7 @@ async function postChatJson(system: string, user: string): Promise<unknown> {
       },
       body: JSON.stringify({
         model: MODEL,
-        temperature: 0.55,
+        temperature: 0.35,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: system },
@@ -269,6 +368,8 @@ function parseFullResult(
     );
   }
 
+  const normalizedDaily = normalizeDailyQuestDayOrders(dailyQuests.slice(0, n));
+
   return {
     specific: (data.specific as string).trim(),
     measurable: (data.measurable as string).trim(),
@@ -276,7 +377,7 @@ function parseFullResult(
     relevant: (data.relevant as string).trim(),
     timeBound,
     checkpoints,
-    dailyQuests: dailyQuests.slice(0, n),
+    dailyQuests: normalizedDaily,
   };
 }
 
@@ -316,7 +417,7 @@ function parseDailyOnly(
       'bad_response',
     );
   }
-  return out.slice(0, n);
+  return normalizeDailyQuestDayOrders(out.slice(0, n));
 }
 
 export async function planNewGoal(
