@@ -4,6 +4,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { GoalMilestoneProgress } from '../components/GoalMilestoneProgress';
 import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
@@ -77,6 +78,9 @@ export function GoalListScreen() {
                 >
                   {item.description}
                 </Text>
+                {item.checkpoints.length > 0 ? (
+                  <GoalMilestoneProgress checkpoints={item.checkpoints} />
+                ) : null}
               </View>
               <Text style={[styles.chevron, { color: colors.textSecondary }]}>
                 ›
