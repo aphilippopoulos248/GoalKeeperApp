@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Screen } from '../components/Screen';
@@ -8,6 +9,8 @@ import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
+import type { Goal, GoalPriority } from '../types';
+import { parseGoalPriority } from '../utils/goalPriority';
 
 type Nav = NativeStackNavigationProp<GoalsStackParamList, 'GoalList'>;
 
@@ -16,39 +19,71 @@ export function GoalListScreen() {
   const navigation = useNavigation<Nav>();
   const { goals } = useActiveGoals();
 
+  const prioritySections = useMemo(() => {
+    const buckets: Record<GoalPriority, Goal[]> = {
+      high: [],
+      medium: [],
+      low: [],
+    };
+    for (const g of goals) {
+      buckets[parseGoalPriority(g.priority)].push(g);
+    }
+    const order: { key: GoalPriority; title: string }[] = [
+      { key: 'high', title: 'High Priority' },
+      { key: 'medium', title: 'Medium Priority' },
+      { key: 'low', title: 'Low Priority' },
+    ];
+    return order
+      .map((o) => ({ ...o, items: buckets[o.key] }))
+      .filter((s) => s.items.length > 0);
+  }, [goals]);
+
   return (
     <Screen>
       <Text style={[styles.heading, { color: colors.text }]}>Active goals</Text>
-      {goals.map((item) => (
-        <Pressable
-          key={item.id}
-          onPress={() =>
-            navigation.navigate('GoalDetail', { goalId: item.id })
-          }
-          style={({ pressed }) => [
-            styles.row,
-            {
-              backgroundColor: colors.surfaceElevated,
-              borderColor: colors.border,
-            },
-            pressed && { opacity: 0.85 },
-          ]}
-        >
-          <View style={styles.rowText}>
-            <Text style={[styles.title, { color: colors.text }]}>
-              {item.title}
-            </Text>
-            <Text
-              style={[styles.subtitle, { color: colors.textSecondary }]}
-              numberOfLines={2}
-            >
-              {item.description}
-            </Text>
-          </View>
-          <Text style={[styles.chevron, { color: colors.textSecondary }]}>
-            ›
+      {prioritySections.map((section, sectionIndex) => (
+        <View key={section.key}>
+          <Text
+            style={[
+              styles.sectionHeading,
+              sectionIndex > 0 && styles.sectionHeadingAfterFirst,
+              { color: colors.textSecondary },
+            ]}
+          >
+            {section.title}
           </Text>
-        </Pressable>
+          {section.items.map((item) => (
+            <Pressable
+              key={item.id}
+              onPress={() =>
+                navigation.navigate('GoalDetail', { goalId: item.id })
+              }
+              style={({ pressed }) => [
+                styles.row,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: colors.border,
+                },
+                pressed && { opacity: 0.85 },
+              ]}
+            >
+              <View style={styles.rowText}>
+                <Text style={[styles.title, { color: colors.text }]}>
+                  {item.title}
+                </Text>
+                <Text
+                  style={[styles.subtitle, { color: colors.textSecondary }]}
+                  numberOfLines={2}
+                >
+                  {item.description}
+                </Text>
+              </View>
+              <Text style={[styles.chevron, { color: colors.textSecondary }]}>
+                ›
+              </Text>
+            </Pressable>
+          ))}
+        </View>
       ))}
       <Pressable
         accessibilityRole="button"
@@ -77,6 +112,14 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     marginBottom: spacing.md,
+  },
+  sectionHeading: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: spacing.sm,
+  },
+  sectionHeadingAfterFirst: {
+    marginTop: spacing.lg,
   },
   row: {
     flexDirection: 'row',
