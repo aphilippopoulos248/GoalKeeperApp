@@ -1,11 +1,11 @@
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { Screen } from '../components/Screen';
 import { useQuestProgress } from '../context/QuestProgressContext';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { spacing } from '../theme/spacing';
 
-const shieldAsset = require('../../assets/profile-shield.png');
+import { BronzeRankIcon } from '../components/ranks/BronzeRankIcon';
 
 export function ProfileScreen() {
   const { colors, mode } = useAppTheme();
@@ -34,7 +34,7 @@ export function ProfileScreen() {
               },
             ]}
           />
-          <Image source={shieldAsset} style={styles.shield} resizeMode="contain" />
+          <BronzeRankIcon size={200} />
         </View>
 
         <Text style={[styles.displayName, { color: colors.text }]}>Alex Runner</Text>
