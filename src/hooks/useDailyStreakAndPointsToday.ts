@@ -5,6 +5,7 @@ import type { Quest } from '../types';
 
 const STREAK_KEY = '@goalkeeper/daily-streak-v1';
 const POINTS_TODAY_KEY = '@goalkeeper/points-today-v1';
+const LIFETIME_QUEST_POINTS_KEY = '@goalkeeper/lifetime-quest-points-v1';
 
 type StreakPersisted = {
   streak: number;
@@ -77,16 +78,37 @@ function normalizePointsForToday(stored: PointsPersisted): PointsPersisted {
   return stored;
 }
 
+async function loadLifetimeQuestPoints(): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(LIFETIME_QUEST_POINTS_KEY);
+    if (!raw) return 0;
+    const n = JSON.parse(raw) as unknown;
+    return typeof n === 'number' && Number.isFinite(n) ? Math.max(0, n) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function saveLifetimeQuestPoints(points: number): Promise<void> {
+  await AsyncStorage.setItem(LIFETIME_QUEST_POINTS_KEY, JSON.stringify(points));
+}
+
 export function useDailyStreakAndPointsToday() {
   const [streak, setStreak] = useState(0);
   const [pointsToday, setPointsToday] = useState(0);
+  const [lifetimeQuestPoints, setLifetimeQuestPoints] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [s, p] = await Promise.all([loadStreak(), loadPointsToday()]);
+      const [s, p, lifetime] = await Promise.all([
+        loadStreak(),
+        loadPointsToday(),
+        loadLifetimeQuestPoints(),
+      ]);
       if (cancelled) return;
       setStreak(s.streak);
+      setLifetimeQuestPoints(lifetime);
       const normalized = normalizePointsForToday(p);
       setPointsToday(normalized.points);
       if (normalized.points !== p.points || normalized.date !== p.date) {
@@ -107,6 +129,11 @@ export function useDailyStreakAndPointsToday() {
         const nextPoints = ptsData.points + quest.points;
         setPointsToday(nextPoints);
         await savePointsToday({ date: today, points: nextPoints });
+
+        const prevLifetime = await loadLifetimeQuestPoints();
+        const nextLifetime = prevLifetime + quest.points;
+        setLifetimeQuestPoints(nextLifetime);
+        await saveLifetimeQuestPoints(nextLifetime);
 
         if (quest.kind !== 'daily') return;
 
@@ -137,9 +164,14 @@ export function useDailyStreakAndPointsToday() {
         const nextPoints = Math.max(0, ptsData.points - quest.points);
         setPointsToday(nextPoints);
         await savePointsToday({ date: today, points: nextPoints });
+
+        const prevLifetime = await loadLifetimeQuestPoints();
+        const nextLifetime = Math.max(0, prevLifetime - quest.points);
+        setLifetimeQuestPoints(nextLifetime);
+        await saveLifetimeQuestPoints(nextLifetime);
       }
     })();
   }, []);
 
-  return { streak, pointsToday, applyQuestToggle };
+  return { streak, pointsToday, lifetimeQuestPoints, applyQuestToggle };
 }

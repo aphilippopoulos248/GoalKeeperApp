@@ -40,3 +40,5 @@ export const mockWeeklyQuests: Quest[] = [
     points: 25,
   },
 ];
+
+export const allMockQuests: Quest[] = [...mockDailyQuests, ...mockWeeklyQuests];

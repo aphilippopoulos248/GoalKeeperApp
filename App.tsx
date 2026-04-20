@@ -6,6 +6,7 @@ import {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { QuestProgressProvider } from './src/context/QuestProgressContext';
 import { RootTabs } from './src/navigation/RootTabs';
 import { ThemeProvider, useAppTheme } from './src/theme/ThemeProvider';
 
@@ -37,7 +38,9 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <AppNavigation />
+          <QuestProgressProvider>
+            <AppNavigation />
+          </QuestProgressProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
