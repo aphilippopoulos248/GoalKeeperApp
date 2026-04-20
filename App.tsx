@@ -1,0 +1,45 @@
+import {
+  DefaultTheme,
+  NavigationContainer,
+  Theme,
+} from '@react-navigation/native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+import { RootTabs } from './src/navigation/RootTabs';
+import { ThemeProvider, useAppTheme } from './src/theme/ThemeProvider';
+
+function AppNavigation() {
+  const { colors, mode } = useAppTheme();
+
+  const navTheme: Theme = {
+    dark: mode === 'dark',
+    colors: {
+      primary: colors.primary,
+      background: colors.background,
+      card: colors.surface,
+      text: colors.text,
+      border: colors.border,
+      notification: colors.primary,
+    },
+    fonts: DefaultTheme.fonts,
+  };
+
+  return (
+    <NavigationContainer theme={navTheme}>
+      <RootTabs />
+    </NavigationContainer>
+  );
+}
+
+export default function App() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <AppNavigation />
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+}
