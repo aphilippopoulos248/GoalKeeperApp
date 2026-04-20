@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -48,6 +49,24 @@ export function GoalListScreen() {
           </Text>
         </Pressable>
       ))}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Add goal"
+        onPress={() => {}}
+        style={({ pressed }) => [
+          styles.addGoalButton,
+          {
+            backgroundColor: colors.surfaceElevated,
+            borderColor: colors.border,
+          },
+          pressed && { opacity: 0.85 },
+        ]}
+      >
+        <Ionicons name="add-circle-outline" size={22} color={colors.primary} />
+        <Text style={[styles.addGoalLabel, { color: colors.primary }]}>
+          Add goal
+        </Text>
+      </Pressable>
     </Screen>
   );
 }
@@ -82,5 +101,20 @@ const styles = StyleSheet.create({
   chevron: {
     fontSize: 22,
     fontWeight: '300',
+  },
+  addGoalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.lg,
+    gap: spacing.sm,
+  },
+  addGoalLabel: {
+    fontSize: 17,
+    fontWeight: '700',
   },
 });
