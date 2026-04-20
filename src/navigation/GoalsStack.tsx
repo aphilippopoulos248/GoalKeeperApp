@@ -1,6 +1,5 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
-import { ActiveGoalsProvider } from '../context/ActiveGoalsContext';
 import { AddGoalScreen } from '../screens/AddGoalScreen';
 import { GoalDetailScreen } from '../screens/GoalDetailScreen';
 import { GoalListScreen } from '../screens/GoalListScreen';
@@ -10,12 +9,10 @@ const Stack = createNativeStackNavigator<GoalsStackParamList>();
 
 export function GoalsStack() {
   return (
-    <ActiveGoalsProvider>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="GoalList" component={GoalListScreen} />
-        <Stack.Screen name="GoalDetail" component={GoalDetailScreen} />
-        <Stack.Screen name="AddGoal" component={AddGoalScreen} />
-      </Stack.Navigator>
-    </ActiveGoalsProvider>
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="GoalList" component={GoalListScreen} />
+      <Stack.Screen name="GoalDetail" component={GoalDetailScreen} />
+      <Stack.Screen name="AddGoal" component={AddGoalScreen} />
+    </Stack.Navigator>
   );
 }

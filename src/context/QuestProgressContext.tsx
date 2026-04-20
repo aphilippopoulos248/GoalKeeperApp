@@ -19,6 +19,7 @@ type QuestProgressValue = {
   streak: number;
   pointsToday: number;
   lifetimeQuestPoints: number;
+  questsCompletedCount: number;
 };
 
 const QuestProgressContext = createContext<QuestProgressValue | null>(null);
@@ -77,6 +78,11 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
     [applyQuestToggle],
   );
 
+  const questsCompletedCount = useMemo(
+    () => Object.values(completed).filter(Boolean).length,
+    [completed],
+  );
+
   const value = useMemo(
     () => ({
       completed,
@@ -84,8 +90,9 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
       streak,
       pointsToday,
       lifetimeQuestPoints,
+      questsCompletedCount,
     }),
-    [completed, toggleQuest, streak, pointsToday, lifetimeQuestPoints],
+    [completed, toggleQuest, streak, pointsToday, lifetimeQuestPoints, questsCompletedCount],
   );
 
   return (

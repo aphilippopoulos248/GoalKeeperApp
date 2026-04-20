@@ -24,6 +24,7 @@ export interface Goal {
   relevant: string;
   timeBound: string;
   checkpoints: Checkpoint[];
+  completed: boolean;
 }
 
 export interface Friend {

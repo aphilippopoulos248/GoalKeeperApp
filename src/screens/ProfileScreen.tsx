@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Screen } from '../components/Screen';
+import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { useQuestProgress } from '../context/QuestProgressContext';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { spacing } from '../theme/spacing';
@@ -9,7 +10,9 @@ import { BronzeRankIcon } from '../components/ranks/BronzeRankIcon';
 
 export function ProfileScreen() {
   const { colors, mode } = useAppTheme();
-  const { lifetimeQuestPoints } = useQuestProgress();
+  const { lifetimeQuestPoints, questsCompletedCount } = useQuestProgress();
+  const { goals } = useActiveGoals();
+  const goalsCompletedCount = goals.filter((g) => g.completed).length;
 
   const glowOuterOpacity = mode === 'dark' ? 0.22 : 0.12;
   const glowInnerOpacity = mode === 'dark' ? 0.35 : 0.18;
@@ -56,6 +59,23 @@ export function ProfileScreen() {
           </Text>
           <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Email</Text>
           <Text style={[styles.fieldValue, { color: colors.text }]}>alex@example.com</Text>
+
+          <View style={styles.statsRow}>
+            <View style={styles.statColumn}>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary, textAlign: 'center' }]}>
+                Quests completed
+              </Text>
+              <Text style={[styles.statValue, { color: colors.text }]}>{questsCompletedCount}</Text>
+            </View>
+            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.statColumn}>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary, textAlign: 'center' }]}>
+                Goals completed
+              </Text>
+              <Text style={[styles.statValue, { color: colors.text }]}>{goalsCompletedCount}</Text>
+            </View>
+          </View>
+
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <Text style={[styles.footerNote, { color: colors.textSecondary }]}>
             Account sync and medals will arrive with Supabase in a later step.
@@ -90,10 +110,6 @@ const styles = StyleSheet.create({
     width: 160,
     height: 160,
     borderRadius: 80,
-  },
-  shield: {
-    width: 200,
-    height: 200,
   },
   displayName: {
     fontSize: 26,
@@ -132,6 +148,26 @@ const styles = StyleSheet.create({
   fieldValue: {
     fontSize: 16,
     fontWeight: '700',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    marginTop: spacing.lg,
+  },
+  statColumn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  statDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    marginHorizontal: spacing.xs,
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: '800',
+    marginTop: spacing.xs,
   },
   divider: {
     height: StyleSheet.hairlineWidth,
