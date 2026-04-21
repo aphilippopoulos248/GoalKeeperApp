@@ -353,16 +353,27 @@ export function DailyQuestDaySchedule({
     });
   }, [defaultScrollY]);
 
-  const layoutGenRef = useRef(0);
-  const scrolledForGenRef = useRef(-1);
+  /** Only auto-scroll to 6:00 once when the timeline first gets content; not on every entries/completed update (e.g. drag-drop). */
+  const initialScrollDoneRef = useRef(false);
+
+  const tryInitialScrollToMorning = useCallback(() => {
+    if (initialScrollDoneRef.current || blocks.length === 0) return;
+    scrollToDefaultMorning();
+    initialScrollDoneRef.current = true;
+  }, [blocks.length, scrollToDefaultMorning]);
 
   useEffect(() => {
-    layoutGenRef.current += 1;
+    if (blocks.length === 0) {
+      initialScrollDoneRef.current = false;
+    }
+  }, [blocks.length]);
+
+  useEffect(() => {
     const id = requestAnimationFrame(() => {
-      requestAnimationFrame(scrollToDefaultMorning);
+      requestAnimationFrame(tryInitialScrollToMorning);
     });
     return () => cancelAnimationFrame(id);
-  }, [entries, completed, scrollToDefaultMorning]);
+  }, [blocks.length, tryInitialScrollToMorning]);
 
   const onDragStart = useCallback((id: string) => {
     setDraggingId(id);
@@ -397,12 +408,7 @@ export function DailyQuestDaySchedule({
         nestedScrollEnabled
         keyboardShouldPersistTaps="handled"
         scrollEnabled={scrollEnabled}
-        onContentSizeChange={() => {
-          const g = layoutGenRef.current;
-          if (scrolledForGenRef.current >= g) return;
-          scrolledForGenRef.current = g;
-          scrollToDefaultMorning();
-        }}
+        onContentSizeChange={tryInitialScrollToMorning}
       >
         <View style={styles.row}>
           <View style={[styles.gutter, { width: GUTTER_WIDTH }]}>
