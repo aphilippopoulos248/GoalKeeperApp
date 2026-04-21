@@ -23,14 +23,14 @@ import { GoalPlannerError, planNewGoal } from '../services/openaiGoalPlanner';
 import type { GoalPriority, MilestoneFrequency } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
-import { collectOccupiedDailySlots } from '../utils/dailyQuestSchedule';
+import { mergeLifeSlotsWithOccupiedGoals } from '../utils/dailyQuestSchedule';
 import { dailyQuestCountForPriority } from '../utils/goalPriority';
 
 type Props = NativeStackScreenProps<GoalsStackParamList, 'AddGoal'>;
 
 export function AddGoalScreen({ navigation }: Props) {
   const { colors, mode } = useAppTheme();
-  const { addGoal, goals } = useActiveGoals();
+  const { addGoal, goals, lifeScheduleSlots } = useActiveGoals();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [targetDate, setTargetDate] = useState(() => startOfTomorrow());
@@ -101,7 +101,8 @@ export function AddGoalScreen({ navigation }: Props) {
           completedCheckpointCount: 0,
           dailyQuestCount: dailyQuestCountForPriority(input.priority),
           milestoneFrequency: input.milestoneFrequency,
-          reservedScheduleSlots: collectOccupiedDailySlots(
+          reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
+            lifeScheduleSlots,
             goals.filter((g) => !g.completed),
           ),
         });
@@ -136,6 +137,7 @@ export function AddGoalScreen({ navigation }: Props) {
       canSubmit,
       description,
       goals,
+      lifeScheduleSlots,
       milestoneFrequency,
       navigation,
       priority,

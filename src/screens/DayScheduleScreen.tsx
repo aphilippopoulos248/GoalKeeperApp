@@ -4,6 +4,7 @@ import { useCallback, useMemo } from 'react';
 import { StyleSheet, Text } from 'react-native';
 
 import { DailyQuestDaySchedule } from '../components/DailyQuestDaySchedule';
+import { ScheduleAiAssistant } from '../components/ScheduleAiAssistant';
 import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { useQuestProgress } from '../context/QuestProgressContext';
@@ -60,6 +61,7 @@ export function DayScheduleScreen() {
         onCommitSchedule={updateDailyQuestSchedule}
         onOpenQuestInMenu={onOpenQuestInMenu}
       />
+      <ScheduleAiAssistant />
     </Screen>
   );
 }

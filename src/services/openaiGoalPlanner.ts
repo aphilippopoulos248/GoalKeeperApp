@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 
-import type { MilestoneFrequency } from '../types';
+import type { MilestoneFrequency, Quest } from '../types';
 
 export type PlannerDailyQuest = {
   title: string;
@@ -207,29 +207,6 @@ function finalizePlannerDailyQuests(
     busy.push({ start: startMinute, end: endPlaced });
     out.push({ ...q, startMinute, durationMinutes });
   }
-  // #region agent log
-  fetch('http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': '1b4fdd',
-    },
-    body: JSON.stringify({
-      sessionId: '1b4fdd',
-      location: 'openaiGoalPlanner.ts:finalizePlannerDailyQuests:out',
-      message: 'finalized daily quest slots',
-      data: {
-        quests: out.map((q) => ({
-          title: q.title.slice(0, 48),
-          startMinute: q.startMinute,
-          durationMinutes: q.durationMinutes,
-        })),
-      },
-      timestamp: Date.now(),
-      hypothesisId: 'H1',
-    }),
-  }).catch(() => {});
-  // #endregion
   return out;
 }
 
@@ -387,6 +364,32 @@ Rules:
 - startMinute MUST fit the quest’s meaning: morning/wake/breakfast quests ≈ 05:00–11:30; lunch/midday ≈ 11:00–14:30; afternoon ≈ 12:00–18:00; evening/wind-down/bedtime prep ≈ 17:00–22:30. Do not put morning-themed actions at night or evening-only habits in the morning.
 - Bands: morning/wake/breakfast → 0–199; lunch/midday/noon → 200–449; afternoon → 450–649; evening/night/before bed/wind-down → 750–999. Morning cues → dayOrder ≤199 and morning startMinute window; evening/bedtime cues → dayOrder ≥750 and evening startMinute window. Example triple: ≈120, ≈350, ≈900.
 - Return exactly ${n} quests (no fewer, no more).`;
+}
+
+const LIFE_BUSY_PARSE_SYSTEM = `You interpret the user's natural-language availability for ONE typical weekday and merge it with any prior busy intervals. Reply with JSON only: { "busyIntervals": [ { "startMinute": number, "endMinute": number }, ... ] }.
+
+Rules:
+- Times are minutes from midnight: 0 = midnight, 540 = 9:00 AM, 1020 = 5:00 PM; endMinute may be up to 1440.
+- Each interval is half-open [startMinute, endMinute): scheduled quests must not overlap these ranges.
+- Interpret phrases like "work 9 to 5", "9am-5pm", "busy until noon", "school 8-3" using a single-day local clock.
+- Merge priorBusyIntervals from the user JSON with the new message into one consolidated list; merge overlapping intervals.
+- If the user clears constraints or says they have no fixed blocks, return [].
+- If the message does not imply schedule blocks, return priorBusyIntervals unchanged (you may only normalize overlaps).`;
+
+function buildRepositionPreservingSystem(dailyQuestCount: number): string {
+  const n = clampQuestCount(dailyQuestCount);
+  return `You are revising ONLY the daily schedule times for an existing goal. Reply with a single JSON object: { "dailyQuests": [ ... ] }.
+The user JSON includes "quests": an ordered array of EXACTLY ${n} existing daily quests. You MUST return exactly ${n} items in dailyQuests in the SAME ORDER.
+
+For each output item you MUST use the SAME "title", "description", and "points" as the corresponding input quest (identical strings and number). Do not rephrase titles or descriptions. You MAY change only "dayOrder", "startMinute", and "durationMinutes".
+
+Constraints: dayOrder 0–999; startMinute 0–1439; durationMinutes 15–120; no overlapping blocks within the batch; prefer 06:00–22:00. reservedScheduleSlots are busy half-open intervals [startMinute, endMinute)—no quest block may overlap them.
+
+Align start times with each quest's meaning (morning / afternoon / evening) when possible.`;
+}
+
+function normalizeTitleKey(s: string): string {
+  return s.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 async function postChatJson(system: string, user: string): Promise<unknown> {
@@ -721,6 +724,134 @@ function parseDailyOnly(
     normalizeDailyQuestDayOrders(out.slice(0, n)),
     reservedScheduleSlots,
   );
+}
+
+function parseRepositionPreservingResult(
+  data: unknown,
+  inputQuests: Quest[],
+  reservedScheduleSlots?: ReservedScheduleSlot[],
+): PlannerDailyQuest[] {
+  const n = inputQuests.length;
+  if (n === 0) return [];
+  if (!isRecord(data) || !Array.isArray(data.dailyQuests)) {
+    throw new GoalPlannerError('Invalid reposition response', 'bad_response');
+  }
+  const arr = data.dailyQuests;
+  if (arr.length < n) {
+    throw new GoalPlannerError(
+      `Expected at least ${n} daily quests in reposition response`,
+      'bad_response',
+    );
+  }
+  const rows: DailyQuestParseRow[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const q = arr[i];
+    if (!isRecord(q)) {
+      throw new GoalPlannerError('Invalid quest row in reposition response', 'bad_response');
+    }
+    const input = inputQuests[i];
+    if (input.kind !== 'daily') {
+      throw new GoalPlannerError('Reposition input must be daily quests', 'bad_response');
+    }
+    const aiTitle = pickQuestField(q, DAILY_QUEST_TITLE_KEYS);
+    if (aiTitle && normalizeTitleKey(aiTitle) !== normalizeTitleKey(input.title)) {
+      throw new GoalPlannerError(
+        'Reposition response changed quest titles or order',
+        'bad_response',
+      );
+    }
+    const orderRaw = q.dayOrder;
+    const dayOrder =
+      typeof orderRaw === 'number' && Number.isFinite(orderRaw)
+        ? clampDayOrder(orderRaw)
+        : clampDayOrder(input.dayOrder ?? 500);
+    const row: DailyQuestParseRow = {
+      title: input.title,
+      description: input.description,
+      points: clampPoints(input.points),
+      dayOrder,
+    };
+    const sm = pickOptionalStartMinute(q);
+    const dm = pickOptionalDurationMinutes(q);
+    if (sm !== undefined) row.startMinute = clampStartMinute(sm);
+    if (dm !== undefined) row.durationMinutes = clampDurationMinutes(dm);
+    rows.push(row);
+  }
+  return finalizePlannerDailyQuests(
+    normalizeDailyQuestDayOrders(rows),
+    reservedScheduleSlots,
+  );
+}
+
+export type RepositionDailyQuestsParams = {
+  goalTitle: string;
+  goalDescription: string;
+  completedCheckpointCount: number;
+  milestoneFrequency: MilestoneFrequency;
+  checkpointTitles: string[];
+  /** Existing daily quests in display order; must all be kind "daily". */
+  quests: Quest[];
+  reservedScheduleSlots: ReservedScheduleSlot[];
+  todayIso: string;
+  targetDateIso: string;
+};
+
+export async function parseLifeBusySlotsFromMessage(params: {
+  message: string;
+  priorBusyIntervals: ReservedScheduleSlot[];
+  todayIso: string;
+}): Promise<ReservedScheduleSlot[]> {
+  const user = JSON.stringify({
+    message: params.message.trim(),
+    priorBusyIntervals: params.priorBusyIntervals,
+    todayIso: params.todayIso,
+  });
+  const data = await postChatJson(LIFE_BUSY_PARSE_SYSTEM, user);
+  if (!isRecord(data) || !Array.isArray(data.busyIntervals)) {
+    throw new GoalPlannerError('Invalid busy intervals JSON', 'bad_response');
+  }
+  const out: ReservedScheduleSlot[] = [];
+  for (const x of data.busyIntervals) {
+    if (!isRecord(x)) continue;
+    const sm = x.startMinute;
+    const em = x.endMinute;
+    if (typeof sm !== 'number' || typeof em !== 'number') continue;
+    const start = Math.min(1439, Math.max(0, Math.round(sm)));
+    const end = Math.min(1440, Math.max(0, Math.round(em)));
+    if (end > start) out.push({ startMinute: start, endMinute: end });
+  }
+  return out;
+}
+
+export async function repositionDailyQuestsPreservingQuests(
+  params: RepositionDailyQuestsParams,
+): Promise<PlannerDailyQuest[]> {
+  const dailies = params.quests.filter((q) => q.kind === 'daily');
+  const n = dailies.length;
+  if (n === 0) return [];
+  const dailyQuestCount = clampQuestCount(n);
+  const user = JSON.stringify({
+    goalTitle: params.goalTitle,
+    goalDescription: params.goalDescription,
+    completedCheckpointCount: params.completedCheckpointCount,
+    milestoneFrequency: params.milestoneFrequency,
+    checkpointTitles: params.checkpointTitles,
+    dailyQuestCount,
+    quests: dailies.map((q) => ({
+      id: q.id,
+      title: q.title,
+      description: q.description,
+      points: q.points,
+      dayOrder: q.dayOrder,
+      scheduleStartMinute: q.scheduleStartMinute,
+      scheduleDurationMinutes: q.scheduleDurationMinutes,
+    })),
+    reservedScheduleSlots: params.reservedScheduleSlots ?? [],
+    todayIso: params.todayIso,
+    targetDateIso: params.targetDateIso,
+  });
+  const data = await postChatJson(buildRepositionPreservingSystem(dailyQuestCount), user);
+  return parseRepositionPreservingResult(data, dailies, params.reservedScheduleSlots);
 }
 
 export async function planNewGoal(

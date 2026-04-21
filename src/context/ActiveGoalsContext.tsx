@@ -10,8 +10,17 @@ import React, {
 } from 'react';
 
 import { SEED_ACTIVE_GOALS } from '../data/mockGoal';
-import { regenerateDailyQuests } from '../services/openaiGoalPlanner';
-import type { GoalPlannerFullResult } from '../services/openaiGoalPlanner';
+import { loadLifeScheduleSlots, saveLifeScheduleSlots } from '../services/lifeScheduleSlots';
+import {
+  parseLifeBusySlotsFromMessage,
+  regenerateDailyQuests,
+  repositionDailyQuestsPreservingQuests,
+} from '../services/openaiGoalPlanner';
+import type {
+  GoalPlannerFullResult,
+  PlannerDailyQuest,
+  ReservedScheduleSlot,
+} from '../services/openaiGoalPlanner';
 import {
   Checkpoint,
   Goal,
@@ -22,7 +31,7 @@ import {
 import {
   clampScheduleDurationMinutes,
   clampScheduleStartMinute,
-  collectOccupiedDailySlots,
+  mergeLifeSlotsWithOccupiedGoals,
 } from '../utils/dailyQuestSchedule';
 import { dailyQuestCountForPriority, parseGoalPriority } from '../utils/goalPriority';
 
@@ -52,6 +61,8 @@ type ActiveGoalsContextValue = {
     scheduleStartMinute: number,
     scheduleDurationMinutes: number,
   ) => void;
+  lifeScheduleSlots: ReservedScheduleSlot[];
+  applyLifeScheduleMessage: (message: string) => Promise<void>;
 };
 
 const ActiveGoalsContext = createContext<ActiveGoalsContextValue | null>(null);
@@ -171,6 +182,28 @@ async function saveGoalsToStorage(goals: Goal[]): Promise<void> {
   await AsyncStorage.setItem(GOALS_STORAGE_KEY, JSON.stringify(goals));
 }
 
+function mergeDailyQuestSchedule(
+  fullQuests: Quest[],
+  dailiesInOrder: Quest[],
+  planned: PlannerDailyQuest[],
+): Quest[] {
+  if (dailiesInOrder.length !== planned.length) return fullQuests;
+  const byId = new Map<string, PlannerDailyQuest>();
+  dailiesInOrder.forEach((q, i) => {
+    byId.set(q.id, planned[i]);
+  });
+  return fullQuests.map((q) => {
+    const p = byId.get(q.id);
+    if (!p || q.kind !== 'daily') return q;
+    return {
+      ...q,
+      dayOrder: p.dayOrder,
+      scheduleStartMinute: p.startMinute,
+      scheduleDurationMinutes: p.durationMinutes,
+    };
+  });
+}
+
 /** Used for AI calls when the goal has no stored deadline (e.g. seed data). */
 function effectiveTargetDateIso(goal: Pick<Goal, 'targetDateIso'>): string {
   if (goal.targetDateIso?.trim()) return goal.targetDateIso;
@@ -255,7 +288,37 @@ function buildGoalFromInput(input: NewGoalInput, enrichment?: GoalPlannerFullRes
 export function ActiveGoalsProvider({ children }: { children: React.ReactNode }) {
   const [goals, setGoals] = useState<Goal[]>(() => [...SEED_ACTIVE_GOALS]);
   const [storageReady, setStorageReady] = useState(false);
+  const [lifeScheduleSlots, setLifeScheduleSlots] = useState<ReservedScheduleSlot[]>([]);
+  const lifeSlotsHydrated = useRef(false);
+  const goalsRef = useRef<Goal[]>(goals);
+  const lifeScheduleSlotsRef = useRef<ReservedScheduleSlot[]>([]);
   const dailyQuestBackfillInFlight = useRef(new Set<string>());
+
+  useEffect(() => {
+    goalsRef.current = goals;
+  }, [goals]);
+
+  useEffect(() => {
+    lifeScheduleSlotsRef.current = lifeScheduleSlots;
+  }, [lifeScheduleSlots]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadLifeScheduleSlots().then((slots) => {
+      if (cancelled) return;
+      setLifeScheduleSlots(slots);
+      lifeScheduleSlotsRef.current = slots;
+      lifeSlotsHydrated.current = true;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!lifeSlotsHydrated.current) return;
+    void saveLifeScheduleSlots(lifeScheduleSlots);
+  }, [lifeScheduleSlots]);
 
   useEffect(() => {
     let cancelled = false;
@@ -302,7 +365,11 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
             checkpointTitles: snapshot.checkpoints.map((c) => c.title),
             dailyQuestCount: questCount,
             milestoneFrequency: parseMilestoneFrequency(snapshot.milestoneFrequency),
-            reservedScheduleSlots: collectOccupiedDailySlots(goals, snapshot.id),
+            reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
+              lifeScheduleSlots,
+              goals,
+              snapshot.id,
+            ),
           });
           const regenBatch = Date.now();
           setGoals((cur) =>
@@ -334,7 +401,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
         }
       })();
     }
-  }, [goals, storageReady]);
+  }, [goals, storageReady, lifeScheduleSlots]);
 
   const addGoal = useCallback((input: NewGoalInput, options?: AddGoalOptions) => {
     setGoals((prev) => [buildGoalFromInput(input, options?.enrichment), ...prev]);
@@ -380,6 +447,57 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     [],
   );
 
+  const applyLifeScheduleMessage = useCallback(async (message: string) => {
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    const today = new Date();
+    const nextSlots = await parseLifeBusySlotsFromMessage({
+      message: trimmed,
+      priorBusyIntervals: lifeScheduleSlotsRef.current,
+      todayIso: today.toISOString(),
+    });
+    setLifeScheduleSlots(nextSlots);
+    lifeScheduleSlotsRef.current = nextSlots;
+
+    let working: Goal[] = goalsRef.current.map((g) => ({
+      ...g,
+      dailyQuests: g.dailyQuests?.map((q) => ({ ...q })),
+    }));
+    const ordered = working.filter(
+      (g) =>
+        !g.completed &&
+        (g.dailyQuests?.filter((q) => q.kind === 'daily').length ?? 0) > 0,
+    );
+    for (const g of ordered) {
+      const dq = g.dailyQuests!.filter((q) => q.kind === 'daily');
+      const reserved = mergeLifeSlotsWithOccupiedGoals(nextSlots, working, g.id);
+      try {
+        const planned = await repositionDailyQuestsPreservingQuests({
+          goalTitle: g.title,
+          goalDescription: g.description,
+          completedCheckpointCount: g.checkpoints.filter((c) => c.done).length,
+          milestoneFrequency: parseMilestoneFrequency(g.milestoneFrequency),
+          checkpointTitles: g.checkpoints.map((c) => c.title),
+          quests: dq,
+          reservedScheduleSlots: reserved,
+          todayIso: today.toISOString(),
+          targetDateIso: effectiveTargetDateIso(g),
+        });
+        working = working.map((goal) => {
+          if (goal.id !== g.id) return goal;
+          return {
+            ...goal,
+            dailyQuests: mergeDailyQuestSchedule(goal.dailyQuests!, dq, planned),
+          };
+        });
+      } catch {
+        /* leave goal unchanged */
+      }
+    }
+    setGoals(working);
+    goalsRef.current = working;
+  }, []);
+
   const toggleCheckpoint = useCallback((goalId: string, checkpointId: string) => {
     setGoals((prev) => {
       const oldGoal = prev.find((g) => g.id === goalId);
@@ -420,7 +538,11 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
                   checkpointTitles: snapshot.checkpoints.map((c) => c.title),
                   dailyQuestCount: questCount,
                   milestoneFrequency: parseMilestoneFrequency(snapshot.milestoneFrequency),
-                  reservedScheduleSlots: collectOccupiedDailySlots(prev, goalId),
+                  reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
+                    lifeScheduleSlotsRef.current,
+                    prev,
+                    goalId,
+                  ),
                 });
                 const regenBatch = Date.now();
                 setGoals((cur) =>
@@ -461,6 +583,8 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       removeGoal,
       toggleCheckpoint,
       updateDailyQuestSchedule,
+      lifeScheduleSlots,
+      applyLifeScheduleMessage,
     }),
     [
       goals,
@@ -469,6 +593,8 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       removeGoal,
       toggleCheckpoint,
       updateDailyQuestSchedule,
+      lifeScheduleSlots,
+      applyLifeScheduleMessage,
     ],
   );
 

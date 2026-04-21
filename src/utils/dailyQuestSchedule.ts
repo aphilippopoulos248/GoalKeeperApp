@@ -1,3 +1,4 @@
+import type { ReservedScheduleSlot } from '../services/openaiGoalPlanner';
 import type { Goal, Quest } from '../types';
 
 const WAKE_START_MINUTE = 6 * 60;
@@ -73,6 +74,22 @@ export function resolveQuestScheduleBlock(
  * Minute ranges [startMinute, endMinute) already used by other goals’ daily quests.
  * Used when generating new dailies so schedules do not overlap across goals.
  */
+/** Life busy windows plus other goals’ daily quest blocks (for planner / finalize). */
+export function mergeLifeSlotsWithOccupiedGoals(
+  life: ReservedScheduleSlot[],
+  goals: Goal[],
+  excludeGoalId?: string,
+): ReservedScheduleSlot[] {
+  const occupied = collectOccupiedDailySlots(goals, excludeGoalId);
+  const normalizedLife: ReservedScheduleSlot[] = [];
+  for (const s of life) {
+    const start = Math.min(1439, Math.max(0, Math.round(s.startMinute)));
+    const end = Math.min(1440, Math.max(0, Math.round(s.endMinute)));
+    if (end > start) normalizedLife.push({ startMinute: start, endMinute: end });
+  }
+  return [...normalizedLife, ...occupied];
+}
+
 export function collectOccupiedDailySlots(
   goals: Goal[],
   excludeGoalId?: string,
