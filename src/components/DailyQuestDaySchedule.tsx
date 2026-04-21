@@ -419,8 +419,7 @@ export function DailyQuestDaySchedule({
     >
       <Text style={[styles.dayTitle, { color: colors.text }]}>{dayLabel}</Text>
       <Text style={[styles.subTitle, { color: colors.textSecondary }]}>
-        12:00 AM – 11:59 PM
-        {onCommitSchedule ? ' · Long-press a block to move it' : ''}
+        {onCommitSchedule ? 'Long-press a block to move it' : ''}
       </Text>
       <ScrollView
         ref={scrollRef}
