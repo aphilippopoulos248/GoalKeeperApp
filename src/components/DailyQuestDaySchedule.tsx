@@ -110,6 +110,7 @@ type ScheduleQuestBlockProps = {
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
   onCommitSchedule?: CommitScheduleFn;
+  onOpenQuestInMenu?: (questId: string) => void;
 };
 
 function ScheduleQuestBlock({
@@ -121,11 +122,22 @@ function ScheduleQuestBlock({
   onDragStart,
   onDragEnd,
   onCommitSchedule,
+  onOpenQuestInMenu,
 }: ScheduleQuestBlockProps) {
   const translateY = useRef(new Animated.Value(0)).current;
   const canDrag = !!onCommitSchedule && block.goalId.length > 0;
 
-  const gesture = useMemo(() => {
+  const doubleTapGesture = useMemo(() => {
+    if (!onOpenQuestInMenu) return null;
+    return Gesture.Tap()
+      .numberOfTaps(2)
+      .runOnJS(true)
+      .onEnd(() => {
+        onOpenQuestInMenu(block.id);
+      });
+  }, [block.id, onOpenQuestInMenu]);
+
+  const panGesture = useMemo(() => {
     if (!canDrag || !onCommitSchedule) return null;
 
     return Gesture.Pan()
@@ -161,6 +173,15 @@ function ScheduleQuestBlock({
     onDragStart,
     snapMinutes,
   ]);
+
+  const rootGesture = useMemo(() => {
+    if (doubleTapGesture && panGesture) {
+      return Gesture.Simultaneous(doubleTapGesture, panGesture);
+    }
+    if (doubleTapGesture) return doubleTapGesture;
+    if (panGesture) return panGesture;
+    return null;
+  }, [doubleTapGesture, panGesture]);
 
   const top = block.start * PIXELS_PER_MINUTE;
   const height = Math.max((block.end - block.start) * PIXELS_PER_MINUTE, 1);
@@ -239,30 +260,49 @@ function ScheduleQuestBlock({
     </View>
   );
 
-  if (!gesture) {
+  const a11yHint = [
+    onCommitSchedule && block.goalId.length > 0
+      ? 'Long-press, then drag up or down to change the time on your schedule'
+      : null,
+    onOpenQuestInMenu ? 'Double-tap to open this quest on the Menu' : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  if (!rootGesture) {
     return (
       <View
         style={[styles.block, layoutStyle]}
         accessibilityRole="text"
         accessibilityLabel={`${block.title}, ${range}`}
+        accessibilityHint={a11yHint || undefined}
       >
         {inner}
       </View>
     );
   }
 
-  return (
-    <GestureDetector gesture={gesture}>
-      <Animated.View
-        style={[styles.block, layoutStyle, { transform: [{ translateY }] }]}
-        accessibilityRole="button"
-        accessibilityLabel={`${block.title}, ${range}`}
-        accessibilityHint="Long-press, then drag up or down to change the time on your schedule"
-      >
-        {inner}
-      </Animated.View>
-    </GestureDetector>
+  const outer = panGesture ? (
+    <Animated.View
+      style={[styles.block, layoutStyle, { transform: [{ translateY }] }]}
+      accessibilityRole="button"
+      accessibilityLabel={`${block.title}, ${range}`}
+      accessibilityHint={a11yHint || undefined}
+    >
+      {inner}
+    </Animated.View>
+  ) : (
+    <View
+      style={[styles.block, layoutStyle]}
+      accessibilityRole="button"
+      accessibilityLabel={`${block.title}, ${range}`}
+      accessibilityHint={a11yHint || undefined}
+    >
+      {inner}
+    </View>
   );
+
+  return <GestureDetector gesture={rootGesture}>{outer}</GestureDetector>;
 }
 
 type Props = {
@@ -273,6 +313,8 @@ type Props = {
   /** Snap dropped start times to this many minutes (e.g. 15). */
   snapMinutes?: number;
   onCommitSchedule?: CommitScheduleFn;
+  /** Double-tap block: navigate to Menu and scroll this quest into view. */
+  onOpenQuestInMenu?: (questId: string) => void;
 };
 
 export function DailyQuestDaySchedule({
@@ -282,6 +324,7 @@ export function DailyQuestDaySchedule({
   mode,
   snapMinutes = 15,
   onCommitSchedule,
+  onOpenQuestInMenu,
 }: Props) {
   const isDark = mode === 'dark';
   const dayHeight = MINUTES_PER_DAY * PIXELS_PER_MINUTE;
@@ -410,6 +453,7 @@ export function DailyQuestDaySchedule({
                 onDragStart={onDragStart}
                 onDragEnd={onDragEnd}
                 onCommitSchedule={onCommitSchedule}
+                onOpenQuestInMenu={onOpenQuestInMenu}
               />
             ))}
           </View>

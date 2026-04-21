@@ -10,7 +10,7 @@ import { SettingsScreen } from '../screens/SettingsScreen';
 import { useAppTheme } from '../theme/ThemeProvider';
 
 export type RootTabParamList = {
-  Menu: undefined;
+  Menu: { focusQuestId?: string } | undefined;
   DaySchedule: undefined;
   ActiveGoals: undefined;
   Friends: undefined;

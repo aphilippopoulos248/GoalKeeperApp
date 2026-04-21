@@ -1,6 +1,9 @@
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
 import { Picker } from '@react-native-picker/picker';
-import { useMemo, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { FlatList, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { DailyQuestProgressCard } from '../components/DailyQuestProgressCard';
 import { QuestRow } from '../components/QuestRow';
@@ -11,6 +14,7 @@ import {
   DailyQuestEntry,
   useQuestProgress,
 } from '../context/QuestProgressContext';
+import type { RootTabParamList } from '../navigation/RootTabs';
 import type { GoalPriority } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
@@ -42,6 +46,9 @@ function prioritySortRank(p: GoalPriority): number {
 
 export function MenuScreen() {
   const { colors } = useAppTheme();
+  const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
+  const route = useRoute<RouteProp<RootTabParamList, 'Menu'>>();
+  const listRef = useRef<FlatList<DailyQuestEntry>>(null);
   const { goals } = useActiveGoals();
   const [sortMode, setSortMode] = useState<DailyQuestSortMode>('recommended');
   const {
@@ -116,115 +123,205 @@ export function MenuScreen() {
 
   const showDailyLoading = awaitingAiQuests && dailyQuestEntries.length === 0;
 
-  return (
-    <Screen>
-      <DailyQuestProgressCard
-        dailyQuests={displayedDailyQuests}
-        completed={completed}
-        streak={streak}
-        pointsToday={pointsToday}
-        colors={colors}
-      />
+  const clearFocusParam = useCallback(() => {
+    navigation.setParams({ focusQuestId: undefined });
+  }, [navigation]);
 
-      <View style={styles.section}>
-        <View style={styles.dailyHeaderRow}>
-          <Text style={[styles.sectionHeading, { color: colors.text }]}>
-            Daily quests
-          </Text>
-          <View
-            style={[
-              styles.sortPickerWrap,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.border,
+  useFocusEffect(
+    useCallback(() => {
+      const id = route.params?.focusQuestId;
+      if (!id) return undefined;
+
+      let cancelled = false;
+      const run = () => {
+        if (cancelled) return;
+        const idx = displayedDailyQuestEntries.findIndex((e) => e.quest.id === id);
+        if (idx < 0) {
+          if (!showDailyLoading) {
+            clearFocusParam();
+          }
+          return;
+        }
+        try {
+          listRef.current?.scrollToIndex({
+            index: idx,
+            animated: true,
+            viewPosition: 0.12,
+          });
+        } catch {
+          /* list not measured yet */
+        }
+        clearFocusParam();
+      };
+
+      const t = setTimeout(run, 120);
+      return () => {
+        cancelled = true;
+        clearTimeout(t);
+      };
+    }, [
+      clearFocusParam,
+      displayedDailyQuestEntries,
+      route.params?.focusQuestId,
+      showDailyLoading,
+    ]),
+  );
+
+  const renderQuestItem = useCallback(
+    ({ item: entry }: { item: DailyQuestEntry }) => (
+      <View
+        style={[
+          styles.questCard,
+          {
+            backgroundColor: colors.surfaceElevated,
+            borderColor: colors.border,
+            ...Platform.select({
+              ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.06,
+                shadowRadius: 3,
               },
-            ]}
+              android: { elevation: 2 },
+              default: {},
+            }),
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.questCardHeader,
+            {
+              backgroundColor: colors.surface,
+              borderBottomColor: colors.border,
+            },
+          ]}
+        >
+          <Text
+            style={[styles.questCardHeaderText, { color: colors.textSecondary }]}
+            numberOfLines={1}
           >
-            <Picker
-              accessibilityLabel="Sort daily quests"
-              selectedValue={sortMode}
-              onValueChange={(v) => setSortMode(v as DailyQuestSortMode)}
-              style={[styles.sortPicker, { color: colors.text }]}
-              mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-              dropdownIconColor={colors.textSecondary}
-            >
-              <Picker.Item
-                label="Recommended"
-                value="recommended"
-                color={colors.text}
-              />
-              <Picker.Item label="Goal" value="goal" color={colors.text} />
-              <Picker.Item
-                label="Priority"
-                value="priority"
-                color={colors.text}
-              />
-            </Picker>
-          </View>
+            {entry.goalTitle}
+          </Text>
         </View>
-        {showDailyLoading ? (
-          <Text style={[styles.loadingHint, { color: colors.textSecondary }]}>
-            Generating quests…
-          </Text>
-        ) : null}
-        {displayedDailyQuestEntries.map((entry) => (
-          <View
-            key={entry.quest.id}
-            style={[
-              styles.questCard,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.border,
-                ...Platform.select({
-                  ios: {
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: 1 },
-                    shadowOpacity: 0.06,
-                    shadowRadius: 3,
-                  },
-                  android: { elevation: 2 },
-                  default: {},
-                }),
-              },
-            ]}
-          >
+        <QuestRow
+          variant="inCard"
+          quest={entry.quest}
+          completed={!!completed[entry.quest.id]}
+          onToggle={() => toggleQuest(entry.quest.id)}
+        />
+      </View>
+    ),
+    [colors, completed, toggleQuest],
+  );
+
+  const listHeader = useMemo(
+    () => (
+      <>
+        <DailyQuestProgressCard
+          dailyQuests={displayedDailyQuests}
+          completed={completed}
+          streak={streak}
+          pointsToday={pointsToday}
+          colors={colors}
+        />
+
+        <View style={styles.section}>
+          <View style={styles.dailyHeaderRow}>
+            <Text style={[styles.sectionHeading, { color: colors.text }]}>
+              Daily quests
+            </Text>
             <View
               style={[
-                styles.questCardHeader,
+                styles.sortPickerWrap,
                 {
-                  backgroundColor: colors.surface,
-                  borderBottomColor: colors.border,
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: colors.border,
                 },
               ]}
             >
-              <Text
-                style={[styles.questCardHeaderText, { color: colors.textSecondary }]}
-                numberOfLines={1}
+              <Picker
+                accessibilityLabel="Sort daily quests"
+                selectedValue={sortMode}
+                onValueChange={(v) => setSortMode(v as DailyQuestSortMode)}
+                style={[styles.sortPicker, { color: colors.text }]}
+                mode={Platform.OS === 'android' ? 'dropdown' : undefined}
+                dropdownIconColor={colors.textSecondary}
               >
-                {entry.goalTitle}
-              </Text>
+                <Picker.Item
+                  label="Recommended"
+                  value="recommended"
+                  color={colors.text}
+                />
+                <Picker.Item label="Goal" value="goal" color={colors.text} />
+                <Picker.Item
+                  label="Priority"
+                  value="priority"
+                  color={colors.text}
+                />
+              </Picker>
             </View>
-            <QuestRow
-              variant="inCard"
-              quest={entry.quest}
-              completed={!!completed[entry.quest.id]}
-              onToggle={() => toggleQuest(entry.quest.id)}
-            />
           </View>
-        ))}
-      </View>
+          {showDailyLoading ? (
+            <Text style={[styles.loadingHint, { color: colors.textSecondary }]}>
+              Generating quests…
+            </Text>
+          ) : null}
+        </View>
+      </>
+    ),
+    [
+      colors,
+      completed,
+      displayedDailyQuests,
+      pointsToday,
+      showDailyLoading,
+      sortMode,
+      streak,
+    ],
+  );
 
+  const listFooter = useMemo(
+    () => (
       <QuestSection
         title="Weekly quests"
         quests={weeklyQuests}
         completed={completed}
         onToggle={toggleQuest}
       />
+    ),
+    [completed, toggleQuest, weeklyQuests],
+  );
+
+  return (
+    <Screen scroll={false}>
+      <FlatList
+        ref={listRef}
+        style={styles.menuList}
+        data={displayedDailyQuestEntries}
+        keyExtractor={(e) => e.quest.id}
+        renderItem={renderQuestItem}
+        ListHeaderComponent={listHeader}
+        ListFooterComponent={listFooter}
+        keyboardShouldPersistTaps="handled"
+        onScrollToIndexFailed={(info) => {
+          setTimeout(() => {
+            listRef.current?.scrollToIndex({
+              index: info.index,
+              animated: true,
+              viewPosition: 0.12,
+            });
+          }, 200);
+        }}
+      />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  menuList: {
+    flex: 1,
+  },
   section: {
     marginBottom: spacing.lg,
   },

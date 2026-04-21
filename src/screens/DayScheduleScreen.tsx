@@ -1,10 +1,13 @@
-import { useMemo } from 'react';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import { useNavigation } from '@react-navigation/native';
+import { useCallback, useMemo } from 'react';
 import { StyleSheet, Text } from 'react-native';
 
 import { DailyQuestDaySchedule } from '../components/DailyQuestDaySchedule';
 import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { useQuestProgress } from '../context/QuestProgressContext';
+import type { RootTabParamList } from '../navigation/RootTabs';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { spacing } from '../theme/spacing';
 import {
@@ -18,8 +21,16 @@ import {
  */
 export function DayScheduleScreen() {
   const { colors, mode } = useAppTheme();
+  const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
   const { goals, updateDailyQuestSchedule } = useActiveGoals();
   const { completed, dailyQuestEntries } = useQuestProgress();
+
+  const onOpenQuestInMenu = useCallback(
+    (questId: string) => {
+      navigation.navigate('Menu', { focusQuestId: questId });
+    },
+    [navigation],
+  );
 
   const awaitingAiQuests = useMemo(
     () =>
@@ -47,6 +58,7 @@ export function DayScheduleScreen() {
         mode={mode}
         snapMinutes={15}
         onCommitSchedule={updateDailyQuestSchedule}
+        onOpenQuestInMenu={onOpenQuestInMenu}
       />
     </Screen>
   );
