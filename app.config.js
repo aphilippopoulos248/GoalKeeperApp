@@ -5,9 +5,9 @@ require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 const appJson = require('./app.json');
 
 /**
- * Loads EXPO_PUBLIC_OPENAI_API_KEY from `.env` in Node (config phase) and exposes
- * it in `extra` so the native app can read it via expo-constants even when
- * Metro does not inline `process.env` as expected.
+ * Loads keys from `.env` in Node (config phase) and exposes them in `extra` so
+ * the native app can read them via expo-constants when Metro does not inline
+ * `process.env` as expected (OpenAI, Supabase).
  */
 module.exports = {
   expo: {
@@ -15,6 +15,8 @@ module.exports = {
     extra: {
       ...(appJson.expo.extra ?? {}),
       openAiApiKey: process.env.EXPO_PUBLIC_OPENAI_API_KEY ?? '',
+      supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL ?? '',
+      supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '',
     },
   },
 };

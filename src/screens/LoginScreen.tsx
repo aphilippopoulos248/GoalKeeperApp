@@ -1,6 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useState } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
@@ -9,19 +10,34 @@ import {
 } from 'react-native';
 
 import { Screen } from '../components/Screen';
+import { supabase } from '../lib/supabase';
 import type { RootStackParamList } from '../navigation/RootStack';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
-export function LoginScreen({ navigation }: Props) {
+export function LoginScreen(_props: Props) {
   const { colors } = useAppTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const onLogin = () => {
-    navigation.replace('Main', { screen: 'Menu' });
+  const onLogin = async () => {
+    setErrorMessage(null);
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (error) {
+        setErrorMessage(error.message);
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -41,6 +57,7 @@ export function LoginScreen({ navigation }: Props) {
         autoCorrect={false}
         autoComplete="email"
         textContentType="emailAddress"
+        editable={!loading}
         style={[
           styles.input,
           {
@@ -64,6 +81,7 @@ export function LoginScreen({ navigation }: Props) {
         autoCorrect={false}
         autoComplete="password"
         textContentType="password"
+        editable={!loading}
         style={[
           styles.input,
           {
@@ -74,20 +92,31 @@ export function LoginScreen({ navigation }: Props) {
         ]}
       />
 
+      {errorMessage ? (
+        <Text style={styles.error} accessibilityLiveRegion="polite">
+          {errorMessage}
+        </Text>
+      ) : null}
+
       <View style={styles.buttonWrap}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Log in"
-          onPress={onLogin}
+          onPress={() => void onLogin()}
+          disabled={loading}
           style={({ pressed }) => [
             styles.submit,
             { backgroundColor: colors.primary },
-            pressed && { opacity: 0.9 },
+            (pressed || loading) && { opacity: 0.9 },
           ]}
         >
-          <Text style={[styles.submitLabel, { color: '#ffffff' }]}>
-            Log in
-          </Text>
+          {loading ? (
+            <ActivityIndicator color="#ffffff" />
+          ) : (
+            <Text style={[styles.submitLabel, { color: '#ffffff' }]}>
+              Log in
+            </Text>
+          )}
         </Pressable>
       </View>
     </Screen>
@@ -115,6 +144,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: spacing.md,
   },
+  error: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: spacing.sm,
+    color: '#ef4444',
+  },
   buttonWrap: {
     marginTop: spacing.sm,
   },
@@ -123,6 +158,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     alignItems: 'center',
+    minHeight: 52,
+    justifyContent: 'center',
   },
   submitLabel: {
     fontSize: 17,
