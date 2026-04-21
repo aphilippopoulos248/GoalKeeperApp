@@ -29,7 +29,7 @@ import {
 import type { GoalPriority, MilestoneFrequency } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
-import { heuristicQuantificationNeed } from '../utils/goalQuantificationHeuristics';
+import { measurementTargetAlreadySpecified } from '../utils/goalQuantificationHeuristics';
 import { mergeLifeSlotsWithOccupiedGoals } from '../utils/dailyQuestSchedule';
 import { dailyQuestCountForPriority } from '../utils/goalPriority';
 
@@ -58,12 +58,8 @@ function startOfTomorrow(): Date {
   return d;
 }
 
-function defaultQuantifyQuestion(kind: 'weight' | 'money'): string {
-  if (kind === 'weight') {
-    return 'How much weight would you like to lose or gain? Include units (e.g. kg or lb).';
-  }
-  return 'How much money would you like to earn, save, or make? Be as specific as you can.';
-}
+const DEFAULT_MEASUREMENT_QUESTION =
+  'What number or amount would make this goal concrete and easy to track?';
 
 function mergeDateAndTime(datePart: Date, timePart: Date): Date {
   const d = new Date(datePart);
@@ -209,47 +205,33 @@ export function AddGoalScreen({ navigation }: Props) {
   const afterSpecificContinue = useCallback(async () => {
     if (!specificOk) return;
     const combined = `${shortTitle} ${specifics}`;
-    const h = heuristicQuantificationNeed(combined);
-    if (h === 'weight') {
-      setQuantifyQuestion(defaultQuantifyQuestion('weight'));
-      setPhase('quantify');
+    if (measurementTargetAlreadySpecified(combined)) {
+      setPhase('deadline');
       return;
     }
-    if (h === 'money') {
-      setQuantifyQuestion(defaultQuantifyQuestion('money'));
-      setPhase('quantify');
-      return;
-    }
-    if (h === 'unclear') {
-      setBusy(true);
-      try {
-        const r = await classifyQuantificationNeed({ shortTitle, specifics });
-        if (r.needsQuantification && r.kind) {
-          setQuantifyQuestion(
-            r.suggestedQuestion || defaultQuantifyQuestion(r.kind),
-          );
-          setPhase('quantify');
-        } else if (r.needsQuantification && r.suggestedQuestion) {
-          setQuantifyQuestion(r.suggestedQuestion);
-          setPhase('quantify');
-        } else {
-          setPhase('deadline');
-        }
-      } catch (err) {
-        const message =
-          err instanceof GoalPlannerError
-            ? err.message
-            : 'Could not analyze your goal. Try again.';
-        Alert.alert('AI unavailable', message, [
-          { text: 'Skip extra question', onPress: () => setPhase('deadline') },
-          { text: 'Retry', onPress: () => void afterSpecificContinue() },
-        ]);
-      } finally {
-        setBusy(false);
+
+    setBusy(true);
+    try {
+      const r = await classifyQuantificationNeed({ shortTitle, specifics });
+      if (r.needsQuantification) {
+        const q = r.suggestedQuestion.trim() || DEFAULT_MEASUREMENT_QUESTION;
+        setQuantifyQuestion(q);
+        setPhase('quantify');
+      } else {
+        setPhase('deadline');
       }
-      return;
+    } catch (err) {
+      const message =
+        err instanceof GoalPlannerError
+          ? err.message
+          : 'Could not analyze your goal. Try again.';
+      Alert.alert('AI unavailable', message, [
+        { text: 'Skip extra question', onPress: () => setPhase('deadline') },
+        { text: 'Retry', onPress: () => void afterSpecificContinue() },
+      ]);
+    } finally {
+      setBusy(false);
     }
-    setPhase('deadline');
   }, [shortTitle, specifics, specificOk]);
 
   const afterQuantifyContinue = useCallback(() => {

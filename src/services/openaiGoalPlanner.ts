@@ -928,21 +928,23 @@ export async function regenerateDailyQuests(
   return parseDailyOnly(data, dailyQuestCount, params.reservedScheduleSlots);
 }
 
-const QUANTIFY_CLASSIFY_SYSTEM = `You decide if the user needs one more question asking for a concrete numeric target (body weight change or money). Reply with JSON only (no markdown):
-{ "needsQuantification": boolean, "kind": "weight" | "money" | null, "suggestedQuestion": string }
+const QUANTIFY_CLASSIFY_SYSTEM = `You help users turn fuzzy goals into measurable targets. Reply with JSON only (no markdown):
+{ "needsQuantification": boolean, "suggestedQuestion": string }
 
-Rules:
-- If the goal already states a clear measurable amount (e.g. "lose 10 kg", "save $5000"), needsQuantification must be false and kind null; suggestedQuestion empty string.
-- If the goal is vague about weight loss/gain without numbers, needsQuantification true, kind "weight", suggestedQuestion a short natural question (one sentence).
-- If vague about money/income/savings without numbers, needsQuantification true, kind "money", suggestedQuestion one sentence.
-- If the goal is unrelated to weight or money targets, needsQuantification false.
-- suggestedQuestion must be empty string when needsQuantification is false.`;
+Decide whether to ask ONE short follow-up so the goal has a clear measurable target (a number, amount, frequency, or concrete trackable outcome).
 
-export type QuantificationKind = 'weight' | 'money';
+Set needsQuantification to true when:
+- The user uses vague language ("more", "less", "better", "a lot") without a number but the goal can reasonably be measured (examples: reading → books/pages per month; weight/fitness → pounds/kg or body-fat %; money → dollar amounts; study → hours per week; running → distance or pace; language learning → hours or level; etc.).
+- The user gives partial context (e.g. current weight) but not the target change or end state you would track.
+
+Set needsQuantification to false when:
+- The goal already states a concrete measurable target (counts, dollar amounts, distances, hours, deadlines with clear numbers, etc.).
+- The goal should NOT be forced into a numeric box: romantic relationships, dating, "get a girlfriend/boyfriend", making friends, grief, self-worth, general happiness, spirituality without metrics — in those cases do not ask for a measurement.
+
+When needsQuantification is true, suggestedQuestion must be exactly one conversational sentence, tailored to their wording (e.g. "How many books would you like to finish by then?", "How much weight would you like to lose?", "How much would you like to earn or save each month?"). When needsQuantification is false, suggestedQuestion must be "".`;
 
 export type ClassifyQuantificationResult = {
   needsQuantification: boolean;
-  kind: QuantificationKind | null;
   suggestedQuestion: string;
 };
 
@@ -960,16 +962,10 @@ export async function classifyQuantificationNeed(params: {
   }
   const needs =
     typeof data.needsQuantification === 'boolean' ? data.needsQuantification : false;
-  let kind: QuantificationKind | null = null;
-  const rawKind = data.kind;
-  if (rawKind === 'weight' || rawKind === 'money') {
-    kind = rawKind;
-  }
   const suggested =
     typeof data.suggestedQuestion === 'string' ? data.suggestedQuestion.trim() : '';
   return {
     needsQuantification: needs,
-    kind,
     suggestedQuestion: suggested,
   };
 }
