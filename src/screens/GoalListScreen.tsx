@@ -79,7 +79,11 @@ export function GoalListScreen() {
                   {item.description}
                 </Text>
                 {item.checkpoints.length > 0 ? (
-                  <GoalMilestoneProgress checkpoints={item.checkpoints} />
+                  <GoalMilestoneProgress
+                    goalId={item.id}
+                    checkpoints={item.checkpoints}
+                    dailyQuests={item.dailyQuests}
+                  />
                 ) : null}
               </View>
               <Text style={[styles.chevron, { color: colors.textSecondary }]}>
