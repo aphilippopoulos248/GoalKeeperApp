@@ -1,7 +1,8 @@
 import type { Goal } from '../types';
 
-const MIN_TARGET = 15;
-const MAX_TARGET = 80;
+/** Full bar requires more quest points; shorter deadlines use a lower (but still substantial) target. */
+const MIN_TARGET = 120;
+const MAX_TARGET = 420;
 const MIN_DAYS = 7;
 const MAX_DAYS = 365;
 const DEFAULT_DAYS = 60;
@@ -29,7 +30,7 @@ export function daysUntilGoalDeadline(targetDateIso: string | undefined): number
 
 /**
  * Full bar cost: shorter time horizons (fewer days left) use a lower target;
- * longer horizons use a higher target (testing-friendly range ~15–80).
+ * longer horizons use a higher target (range roughly MIN_TARGET–MAX_TARGET).
  */
 export function computeGoalBarTargetPoints(goal: Pick<Goal, 'targetDateIso'>): number {
   const days = daysUntilGoalDeadline(goal.targetDateIso);

@@ -533,67 +533,12 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
         return i >= idx ? { ...c, done: false } : c;
       });
 
-      const prevDoneCount = oldGoal.checkpoints.filter((c) => c.done).length;
-      const nextDoneCount = nextCheckpoints.filter((c) => c.done).length;
-
       const nextGoals = prev.map((g) =>
         g.id === goalId ? { ...g, checkpoints: nextCheckpoints } : g,
       );
 
-      const markingComplete = !cp.done && nextDoneCount > prevDoneCount;
-
-      if (markingComplete) {
-        const updated = nextGoals.find((g) => g.id === goalId);
-        if (updated) {
-          const snapshot = { ...updated, checkpoints: nextCheckpoints };
-          queueMicrotask(() => {
-            void (async () => {
-              try {
-                const today = new Date();
-                const questCount = dailyQuestCountForPriority(
-                  parseGoalPriority(snapshot.priority),
-                );
-                const dailyQuestsRaw = await regenerateDailyQuests({
-                  title: snapshot.title,
-                  description: snapshot.description,
-                  targetDateIso: effectiveTargetDateIso(snapshot),
-                  todayIso: today.toISOString(),
-                  completedCheckpointCount: nextDoneCount,
-                  checkpointTitles: snapshot.checkpoints.map((c) => c.title),
-                  dailyQuestCount: questCount,
-                  milestoneFrequency: parseMilestoneFrequency(snapshot.milestoneFrequency),
-                  reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
-                    lifeScheduleSlotsRef.current,
-                    prev,
-                    goalId,
-                  ),
-                });
-                const regenBatch = Date.now();
-                setGoals((cur) =>
-                  cur.map((g) => {
-                    if (g.id !== goalId) return g;
-                    return {
-                      ...g,
-                      dailyQuests: dailyQuestsRaw.map((q, i) => ({
-                        id: `${g.id}-ai-dq-${regenBatch}-${i + 1}`,
-                        kind: 'daily' as const,
-                        title: q.title,
-                        description: q.description,
-                        points: q.points,
-                        dayOrder: q.dayOrder,
-                        scheduleStartMinute: q.startMinute,
-                        scheduleDurationMinutes: q.durationMinutes,
-                      })),
-                    };
-                  }),
-                );
-              } catch {
-                // Non-blocking: keep existing quests on API failure
-              }
-            })();
-          });
-        }
-      }
+      // Intentionally no regenerateDailyQuests here on checkpoint complete: replacing daily
+      // quest ids would orphan AsyncStorage quest completion keys and clear "done" state in the UI.
 
       return nextGoals;
     });

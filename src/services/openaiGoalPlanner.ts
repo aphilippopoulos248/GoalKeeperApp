@@ -91,10 +91,33 @@ function getApiKey(): string {
   return '';
 }
 
-function clampPoints(n: number): number {
-  if (!Number.isFinite(n)) return 4;
-  /** Low range for testing milestone bar fill. */
-  return Math.min(6, Math.max(2, Math.round(n)));
+/** Allowed quest point values; missing/invalid AI output picks by quest index. */
+const QUEST_POINT_TIERS = [10, 15, 20, 25] as const;
+
+function defaultPointsForQuestIndex(index: number): number {
+  return QUEST_POINT_TIERS[index % 4];
+}
+
+/** Map AI number into [10,25], then snap to nearest tier so only 10/15/20/25 appear. */
+function snapToPointTier(n: number): number {
+  const clamped = Math.min(25, Math.max(10, Math.round(n)));
+  let best = QUEST_POINT_TIERS[0];
+  let bestDist = Math.abs(clamped - best);
+  for (const t of QUEST_POINT_TIERS) {
+    const d = Math.abs(clamped - t);
+    if (d < bestDist) {
+      best = t;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+function resolveQuestPoints(raw: unknown, questIndex: number): number {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return snapToPointTier(raw);
+  }
+  return defaultPointsForQuestIndex(questIndex);
 }
 
 function clampQuestCount(n: number): number {
@@ -344,6 +367,7 @@ Rules:
 - If completedCheckpointCount is higher, increase difficulty and points modestly (still safe and actionable).
 - Checkpoints must align with the goal, deadline, and milestoneFrequency from the user message.
 - dailyQuests must be specific to this goal’s title and description (not generic self-help).
+- Each dailyQuest "points" MUST be exactly one of 10, 15, 20, or 25 (use different values across quests when possible).
 - Each dailyQuest MUST include dayOrder: integer 0–999. The app sorts ALL goals’ quests by dayOrder ascending (lower = earlier on the Menu, higher = later).
 - Each dailyQuest MUST include startMinute: integer 0–1439 (minutes from midnight) and durationMinutes: integer 15–120 for a single-day schedule block. Space blocks within roughly 06:00–22:00, ordered consistently with dayOrder (earlier dayOrder → earlier startMinute). No overlapping time ranges within this goal’s dailyQuests array (each block’s [startMinute, startMinute+durationMinutes) must be disjoint). The user message may include reservedScheduleSlots: busy [startMinute, endMinute) ranges from OTHER goals—your new dailyQuests MUST NOT overlap those ranges (only one quest at a time on the shared day).
 - startMinute MUST match the real-world time of day implied by that quest’s title and description: morning / wake / breakfast / early work → about 05:00–11:30 (startMinute roughly 300–690); lunch / midday → about 11:00–14:30 (660–870); afternoon / after school / after work → about 12:00–18:00 (720–1080); evening / wind-down / before bed / night prep → about 17:00–22:30 (1020–1350). Never schedule a clearly morning-themed quest in late evening or a bedtime task in the morning.
@@ -357,7 +381,7 @@ Rules:
 function buildRegenSystem(dailyQuestCount: number): string {
   const n = clampQuestCount(dailyQuestCount);
   return `You are a goal-planning coach. Reply with a single JSON object only: { "dailyQuests": [ ... ] }.
-dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder", "startMinute", "durationMinutes" } with points 2–6, dayOrder 0–999, startMinute 0–1439, durationMinutes 15–120. Blocks must not overlap within the array; prefer 06:00–22:00. If the user JSON includes reservedScheduleSlots, treat each entry as a busy half-open interval [startMinute, endMinute)—your quests must not overlap those (one quest at a time globally).
+dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder", "startMinute", "durationMinutes" } with points exactly 10, 15, 20, or 25 only (vary across quests), dayOrder 0–999, startMinute 0–1439, durationMinutes 15–120. Blocks must not overlap within the array; prefer 06:00–22:00. If the user JSON includes reservedScheduleSlots, treat each entry as a busy half-open interval [startMinute, endMinute)—your quests must not overlap those (one quest at a time globally).
 
 Rules:
 - The user JSON includes "checkpointTitles": the existing milestone names for this goal. Daily quests must be **smaller preparatory steps** (practice, study, low-stakes drills) that **support** those milestones—**not** duplicate them. Daily quests should feel **easier** than completing a milestone; milestones stay the **bold stretch** challenges.
@@ -635,8 +659,7 @@ function parseFullResult(
     }
     title = paired.title;
     description = paired.description;
-    const points = q.points;
-    const pts = typeof points === 'number' ? clampPoints(points) : 4;
+    const pts = resolveQuestPoints(q.points, dqIndex);
     const defaultOrder =
       n <= 1 ? 500 : Math.round((dqIndex / Math.max(n - 1, 1)) * 999);
     const orderRaw = q.dayOrder;
@@ -700,7 +723,7 @@ function parseDailyOnly(
     if (!paired) continue;
     title = paired.title;
     description = paired.description;
-    const pts = typeof q.points === 'number' ? clampPoints(q.points) : 4;
+    const pts = resolveQuestPoints(q.points, dqIndex);
     const defaultOrder =
       n <= 1 ? 500 : Math.round((dqIndex / Math.max(n - 1, 1)) * 999);
     const orderRaw = q.dayOrder;
@@ -775,7 +798,7 @@ function parseRepositionPreservingResult(
     const row: DailyQuestParseRow = {
       title: input.title,
       description: input.description,
-      points: clampPoints(input.points),
+      points: resolveQuestPoints(input.points, i),
       dayOrder,
     };
     const sm = pickOptionalStartMinute(q);

@@ -6,7 +6,7 @@ export const mockDailyQuests: Quest[] = [
     kind: 'daily',
     title: 'Morning focus block',
     description: 'Spend 25 minutes on your top milestone with no distractions.',
-    points: 4,
+    points: 15,
     dayOrder: 120,
   },
   {
@@ -14,7 +14,7 @@ export const mockDailyQuests: Quest[] = [
     kind: 'daily',
     title: 'Log one win',
     description: 'Write a single sentence about progress you made today.',
-    points: 3,
+    points: 10,
     dayOrder: 480,
   },
   {
@@ -22,7 +22,7 @@ export const mockDailyQuests: Quest[] = [
     kind: 'daily',
     title: 'Prep tomorrow',
     description: 'Pick the next tiny action you will take tomorrow.',
-    points: 3,
+    points: 10,
     dayOrder: 880,
   },
 ];
@@ -33,14 +33,14 @@ export const mockWeeklyQuests: Quest[] = [
     kind: 'weekly',
     title: 'Checkpoint review',
     description: 'Review each checkpoint and adjust dates if needed.',
-    points: 6,
+    points: 40,
   },
   {
     id: 'wq-2',
     kind: 'weekly',
     title: 'Accountability ping',
     description: 'Tell a friend one goal update for the week.',
-    points: 5,
+    points: 25,
   },
 ];
 
