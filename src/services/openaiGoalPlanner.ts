@@ -30,6 +30,12 @@ export type GoalPlannerFullResult = {
   dailyQuests: PlannerDailyQuest[];
 };
 
+/** Half-open [startMinute, endMinute) in minutes from midnight; occupied by another goal’s dailies. */
+export type ReservedScheduleSlot = {
+  startMinute: number;
+  endMinute: number;
+};
+
 export type GoalPlannerBaseParams = {
   title: string;
   description: string;
@@ -40,6 +46,8 @@ export type GoalPlannerBaseParams = {
   dailyQuestCount: number;
   /** Milestone spacing for checkpoints; defaults to weekly when omitted. */
   milestoneFrequency?: MilestoneFrequency;
+  /** Busy intervals from other active goals; new dailies must not overlap these. */
+  reservedScheduleSlots?: ReservedScheduleSlot[];
 };
 
 export type RegenerateDailyQuestsParams = GoalPlannerBaseParams & {
@@ -119,11 +127,34 @@ function deriveStartMinuteFromDayOrder(dayOrder: number, durationMinutes: number
   return clampStartMinute(Math.min(t, WAKE_END_MINUTE - d));
 }
 
+type BusyInterval = { start: number; end: number };
+
+function normalizeReservedSlots(
+  reserved: ReservedScheduleSlot[] | undefined,
+): BusyInterval[] {
+  if (!reserved || reserved.length === 0) return [];
+  const out: BusyInterval[] = [];
+  for (const r of reserved) {
+    const s = clampStartMinute(r.startMinute);
+    const e = Math.min(1440, Math.max(0, Math.round(r.endMinute)));
+    if (e > s) out.push({ start: s, end: e });
+  }
+  return out;
+}
+
+function overlaps(aStart: number, aEnd: number, b: BusyInterval): boolean {
+  return b.start < aEnd && b.end > aStart;
+}
+
 /**
- * Ensures each quest has start/duration, resolves overlaps within this batch by nudging later blocks forward.
+ * Ensures each quest has start/duration; nudges blocks past reserved intervals and past each other (no overlap).
  */
-function finalizePlannerDailyQuests(rows: DailyQuestParseRow[]): PlannerDailyQuest[] {
+function finalizePlannerDailyQuests(
+  rows: DailyQuestParseRow[],
+  reserved?: ReservedScheduleSlot[],
+): PlannerDailyQuest[] {
   if (rows.length === 0) return [];
+  const busy: BusyInterval[] = normalizeReservedSlots(reserved);
   const drafted = rows.map((r) => {
     const durationMinutes = clampDurationMinutes(r.durationMinutes);
     const hasStart =
@@ -140,12 +171,30 @@ function finalizePlannerDailyQuests(rows: DailyQuestParseRow[]): PlannerDailyQue
       durationMinutes,
     };
   });
-  drafted.sort((a, b) => a.startMinute - b.startMinute);
-  let cursor = WAKE_START_MINUTE;
+  drafted.sort((a, b) => a.startMinute - b.startMinute || a.dayOrder - b.dayOrder);
   const out: PlannerDailyQuest[] = [];
   for (const q of drafted) {
-    let startMinute = Math.max(q.startMinute, cursor, WAKE_START_MINUTE);
+    let startMinute = Math.max(q.startMinute, WAKE_START_MINUTE);
     let durationMinutes = q.durationMinutes;
+    const maxBumpIters = 64;
+    for (let iter = 0; iter < maxBumpIters; iter += 1) {
+      const maxDur = 1440 - startMinute;
+      if (durationMinutes > maxDur) {
+        durationMinutes = Math.max(15, maxDur);
+      }
+      if (durationMinutes < 15) {
+        startMinute = Math.max(WAKE_START_MINUTE, 1440 - 15);
+        durationMinutes = 15;
+      }
+      const endMinute = startMinute + durationMinutes;
+      const conflicting = busy.filter((b) => overlaps(startMinute, endMinute, b));
+      if (conflicting.length === 0) break;
+      const nextStart = Math.max(
+        ...conflicting.map((c) => c.end),
+        WAKE_START_MINUTE,
+      );
+      startMinute = clampStartMinute(nextStart);
+    }
     const maxDur = 1440 - startMinute;
     if (durationMinutes > maxDur) {
       durationMinutes = Math.max(15, maxDur);
@@ -154,7 +203,8 @@ function finalizePlannerDailyQuests(rows: DailyQuestParseRow[]): PlannerDailyQue
       startMinute = Math.max(WAKE_START_MINUTE, 1440 - 15);
       durationMinutes = 15;
     }
-    cursor = startMinute + durationMinutes;
+    const endPlaced = startMinute + durationMinutes;
+    busy.push({ start: startMinute, end: endPlaced });
     out.push({ ...q, startMinute, durationMinutes });
   }
   return out;
@@ -289,7 +339,7 @@ Rules:
 - Checkpoints must align with the goal, deadline, and milestoneFrequency from the user message.
 - dailyQuests must be specific to this goal’s title and description (not generic self-help).
 - Each dailyQuest MUST include dayOrder: integer 0–999. The app sorts ALL goals’ quests by dayOrder ascending (lower = earlier on the Menu, higher = later).
-- Each dailyQuest MUST include startMinute: integer 0–1439 (minutes from midnight) and durationMinutes: integer 15–120 for a single-day schedule block. Space blocks within roughly 06:00–22:00, ordered consistently with dayOrder (earlier dayOrder → earlier startMinute). No overlapping time ranges within this goal’s dailyQuests array (each block’s [startMinute, startMinute+durationMinutes) must be disjoint).
+- Each dailyQuest MUST include startMinute: integer 0–1439 (minutes from midnight) and durationMinutes: integer 15–120 for a single-day schedule block. Space blocks within roughly 06:00–22:00, ordered consistently with dayOrder (earlier dayOrder → earlier startMinute). No overlapping time ranges within this goal’s dailyQuests array (each block’s [startMinute, startMinute+durationMinutes) must be disjoint). The user message may include reservedScheduleSlots: busy [startMinute, endMinute) ranges from OTHER goals—your new dailyQuests MUST NOT overlap those ranges (only one quest at a time on the shared day).
 - startMinute MUST match the real-world time of day implied by that quest’s title and description: morning / wake / breakfast / early work → about 05:00–11:30 (startMinute roughly 300–690); lunch / midday → about 11:00–14:30 (660–870); afternoon / after school / after work → about 12:00–18:00 (720–1080); evening / wind-down / before bed / night prep → about 17:00–22:30 (1020–1350). Never schedule a clearly morning-themed quest in late evening or a bedtime task in the morning.
 - dayOrder bands (follow strictly): morning / wake / breakfast → 0–199; lunch / midday / noon → 200–449; afternoon → 450–649; evening / night / before bed / wind-down → 750–999. Spread multiple quests across the right band; do not reuse the same integer for every quest.
 - Hard rule: if title or description clearly means morning or right after waking, dayOrder MUST be ≤199 and startMinute MUST fall in the morning window above. If it clearly means evening or before bed, dayOrder MUST be ≥750 and startMinute MUST fall in the evening window above.
@@ -301,7 +351,7 @@ Rules:
 function buildRegenSystem(dailyQuestCount: number): string {
   const n = clampQuestCount(dailyQuestCount);
   return `You are a goal-planning coach. Reply with a single JSON object only: { "dailyQuests": [ ... ] }.
-dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder", "startMinute", "durationMinutes" } with points 10–25, dayOrder 0–999, startMinute 0–1439, durationMinutes 15–120. Blocks must not overlap within the array; prefer 06:00–22:00.
+dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder", "startMinute", "durationMinutes" } with points 10–25, dayOrder 0–999, startMinute 0–1439, durationMinutes 15–120. Blocks must not overlap within the array; prefer 06:00–22:00. If the user JSON includes reservedScheduleSlots, treat each entry as a busy half-open interval [startMinute, endMinute)—your quests must not overlap those (one quest at a time globally).
 
 Rules:
 - The user message includes milestoneFrequency (weekly / biweekly / monthly). Align daily quest pacing and tone with that milestone cadence (e.g. smaller steps for weekly checkpoints vs monthly).
@@ -489,6 +539,7 @@ function pairTitleDescription(
 function parseFullResult(
   data: unknown,
   dailyQuestCount: number,
+  reservedScheduleSlots?: ReservedScheduleSlot[],
 ): GoalPlannerFullResult {
   const n = clampQuestCount(dailyQuestCount);
   if (!isRecord(data)) {
@@ -583,6 +634,7 @@ function parseFullResult(
 
   const normalizedDaily = finalizePlannerDailyQuests(
     normalizeDailyQuestDayOrders(dailyQuests.slice(0, n)),
+    reservedScheduleSlots,
   );
 
   return {
@@ -599,6 +651,7 @@ function parseFullResult(
 function parseDailyOnly(
   data: unknown,
   dailyQuestCount: number,
+  reservedScheduleSlots?: ReservedScheduleSlot[],
 ): GoalPlannerFullResult['dailyQuests'] {
   const n = clampQuestCount(dailyQuestCount);
   if (!isRecord(data) || !Array.isArray(data.dailyQuests)) {
@@ -641,7 +694,10 @@ function parseDailyOnly(
       'bad_response',
     );
   }
-  return finalizePlannerDailyQuests(normalizeDailyQuestDayOrders(out.slice(0, n)));
+  return finalizePlannerDailyQuests(
+    normalizeDailyQuestDayOrders(out.slice(0, n)),
+    reservedScheduleSlots,
+  );
 }
 
 export async function planNewGoal(
@@ -657,13 +713,14 @@ export async function planNewGoal(
     completedCheckpointCount: params.completedCheckpointCount,
     dailyQuestCount,
     milestoneFrequency,
+    reservedScheduleSlots: params.reservedScheduleSlots ?? [],
   });
 
   const data = await postChatJson(
     buildFullSystem(dailyQuestCount, milestoneFrequency),
     user,
   );
-  return parseFullResult(data, dailyQuestCount);
+  return parseFullResult(data, dailyQuestCount, params.reservedScheduleSlots);
 }
 
 export async function regenerateDailyQuests(
@@ -680,8 +737,9 @@ export async function regenerateDailyQuests(
     checkpointTitles: params.checkpointTitles,
     dailyQuestCount,
     milestoneFrequency,
+    reservedScheduleSlots: params.reservedScheduleSlots ?? [],
   });
 
   const data = await postChatJson(buildRegenSystem(dailyQuestCount), user);
-  return parseDailyOnly(data, dailyQuestCount);
+  return parseDailyOnly(data, dailyQuestCount, params.reservedScheduleSlots);
 }

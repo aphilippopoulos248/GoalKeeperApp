@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { DailyQuestEntry } from '../context/QuestProgressContext';
@@ -11,11 +11,14 @@ import {
 } from '../utils/dailyQuestSchedule';
 
 const MINUTES_PER_DAY = 24 * 60;
-const PIXELS_PER_MINUTE = 0.72;
+/** Vertical scale: hour spacing = 60 * this (was 0.72; 2× wider hour gaps). */
+const PIXELS_PER_MINUTE = 1.44;
 /** Viewport height for the day column; full day scrolls inside. */
 const SCHEDULE_TIMELINE_MAX_HEIGHT = 400;
 const GUTTER_WIDTH = 54;
 const HOUR_COUNT = 24;
+/** Show this time at the top of the scroll viewport initially (6:00 AM). */
+const DEFAULT_SCROLL_START_MINUTE = 6 * 60;
 
 type ScheduleBlock = {
   id: string;
@@ -52,10 +55,11 @@ function buildLayout(
       total,
     );
     const end = Math.min(MINUTES_PER_DAY, startMinute + durationMinutes);
+    const rawTitle = e.quest.title?.trim() ?? '';
     return {
       id: e.quest.id,
       goalId: e.goalId,
-      title: e.quest.title,
+      title: rawTitle.length > 0 ? rawTitle : 'Daily quest',
       start: startMinute,
       end,
       done: !!completed[e.quest.id],
@@ -95,6 +99,11 @@ export function DailyQuestDaySchedule({
 }: Props) {
   const isDark = mode === 'dark';
   const dayHeight = MINUTES_PER_DAY * PIXELS_PER_MINUTE;
+  const scrollRef = useRef<ScrollView>(null);
+  const defaultScrollY = useMemo(
+    () => DEFAULT_SCROLL_START_MINUTE * PIXELS_PER_MINUTE,
+    [],
+  );
 
   const { blocks, dayLabel } = useMemo(() => {
     const dayLabelStr = new Date().toLocaleDateString(undefined, {
@@ -104,6 +113,24 @@ export function DailyQuestDaySchedule({
     });
     return { blocks: buildLayout(entries, completed), dayLabel: dayLabelStr };
   }, [entries, completed]);
+
+  const scrollToDefaultMorning = useCallback(() => {
+    scrollRef.current?.scrollTo({
+      y: Math.max(0, defaultScrollY),
+      animated: false,
+    });
+  }, [defaultScrollY]);
+
+  const layoutGenRef = useRef(0);
+  const scrolledForGenRef = useRef(-1);
+
+  useEffect(() => {
+    layoutGenRef.current += 1;
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(scrollToDefaultMorning);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [entries, completed, scrollToDefaultMorning]);
 
   return (
     <View
@@ -120,11 +147,18 @@ export function DailyQuestDaySchedule({
         12:00 AM – 11:59 PM
       </Text>
       <ScrollView
+        ref={scrollRef}
         style={{ maxHeight: SCHEDULE_TIMELINE_MAX_HEIGHT }}
         contentContainerStyle={styles.timelineScrollContent}
         showsVerticalScrollIndicator
         nestedScrollEnabled
         keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => {
+          const g = layoutGenRef.current;
+          if (scrolledForGenRef.current >= g) return;
+          scrolledForGenRef.current = g;
+          scrollToDefaultMorning();
+        }}
       >
         <View style={styles.row}>
           <View style={[styles.gutter, { width: GUTTER_WIDTH }]}>
@@ -170,6 +204,8 @@ export function DailyQuestDaySchedule({
                 (b.end - b.start) * PIXELS_PER_MINUTE,
                 1,
               );
+              /** AI quests often use 15–30m blocks; a few px tall clips labels with overflow:hidden. */
+              const compact = height < 26;
               const laneW = 100 / b.laneCount;
               const leftPct = (b.lane / b.laneCount) * 100;
               const accent = accentForGoal(b.goalId, colors.primary, isDark);
@@ -187,6 +223,7 @@ export function DailyQuestDaySchedule({
                       width: `${laneW}%`,
                       paddingRight: 3,
                       opacity: b.done ? 0.55 : 1,
+                      zIndex: 1,
                     },
                   ]}
                 >
@@ -200,35 +237,47 @@ export function DailyQuestDaySchedule({
                           ios: {
                             shadowColor: '#000',
                             shadowOffset: { width: 0, height: 1 },
-                            shadowOpacity: 0.08,
+                            shadowOpacity: compact ? 0.04 : 0.08,
                             shadowRadius: 2,
                           },
-                          android: { elevation: 2 },
+                          android: { elevation: compact ? 1 : 2 },
                           default: {},
                         }),
                       },
                     ]}
                   >
                     <View style={[styles.accentBar, { backgroundColor: accent }]} />
-                    <View style={styles.blockTextWrap}>
+                    <View
+                      style={[
+                        styles.blockTextWrap,
+                        compact && styles.blockTextWrapCompact,
+                      ]}
+                    >
                       <Text
                         style={[
                           styles.blockTitle,
+                          compact && styles.blockTitleCompact,
                           {
                             color: colors.text,
                             textDecorationLine: b.done ? 'line-through' : 'none',
                           },
                         ]}
-                        numberOfLines={2}
+                        numberOfLines={compact ? 1 : 2}
+                        {...Platform.select({
+                          android: { includeFontPadding: compact ? false : true },
+                          default: {},
+                        })}
                       >
                         {b.title}
                       </Text>
-                      <Text
-                        style={[styles.blockTime, { color: colors.textSecondary }]}
-                        numberOfLines={1}
-                      >
-                        {range}
-                      </Text>
+                      {!compact ? (
+                        <Text
+                          style={[styles.blockTime, { color: colors.textSecondary }]}
+                          numberOfLines={1}
+                        >
+                          {range}
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                 </View>
@@ -291,12 +340,13 @@ const styles = StyleSheet.create({
   block: {
     position: 'absolute',
     paddingLeft: 4,
+    overflow: 'visible',
   },
   blockInner: {
     height: '100%',
     borderRadius: radius.sm,
     borderWidth: 1,
-    overflow: 'hidden',
+    overflow: 'visible',
     flexDirection: 'row',
   },
   accentBar: {
@@ -309,9 +359,19 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     minWidth: 0,
   },
+  blockTextWrapCompact: {
+    paddingVertical: 0,
+    paddingHorizontal: 4,
+    justifyContent: 'center',
+  },
   blockTitle: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  blockTitleCompact: {
+    fontSize: 10,
+    fontWeight: '600',
+    lineHeight: 12,
   },
   blockTime: {
     fontSize: 11,

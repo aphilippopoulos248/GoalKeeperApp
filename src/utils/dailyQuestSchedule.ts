@@ -1,4 +1,4 @@
-import type { Quest } from '../types';
+import type { Goal, Quest } from '../types';
 
 const WAKE_START_MINUTE = 6 * 60;
 const WAKE_END_MINUTE = 22 * 60;
@@ -46,6 +46,35 @@ export function resolveQuestScheduleBlock(
     WAKE_START_MINUTE + Math.round((order / 999) * span),
   );
   return { startMinute, durationMinutes };
+}
+
+/**
+ * Minute ranges [startMinute, endMinute) already used by other goals’ daily quests.
+ * Used when generating new dailies so schedules do not overlap across goals.
+ */
+export function collectOccupiedDailySlots(
+  goals: Goal[],
+  excludeGoalId?: string,
+): Array<{ startMinute: number; endMinute: number }> {
+  const slots: Array<{ startMinute: number; endMinute: number }> = [];
+  for (const g of goals) {
+    if (g.completed) continue;
+    if (excludeGoalId != null && g.id === excludeGoalId) continue;
+    const dailies = (g.dailyQuests ?? []).filter((q) => q.kind === 'daily');
+    const n = dailies.length;
+    dailies.forEach((quest, i) => {
+      const { startMinute, durationMinutes } = resolveQuestScheduleBlock(
+        quest,
+        i,
+        Math.max(n, 1),
+      );
+      const endMinute = Math.min(24 * 60, startMinute + durationMinutes);
+      if (endMinute > startMinute) {
+        slots.push({ startMinute, endMinute });
+      }
+    });
+  }
+  return slots;
 }
 
 export function formatScheduleRange(startMinute: number, endMinute: number): string {

@@ -19,6 +19,7 @@ import {
   MilestoneFrequency,
   Quest,
 } from '../types';
+import { collectOccupiedDailySlots } from '../utils/dailyQuestSchedule';
 import { dailyQuestCountForPriority, parseGoalPriority } from '../utils/goalPriority';
 
 const GOALS_STORAGE_KEY = '@goalkeeper/active-goals-v1';
@@ -291,6 +292,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
             checkpointTitles: snapshot.checkpoints.map((c) => c.title),
             dailyQuestCount: questCount,
             milestoneFrequency: parseMilestoneFrequency(snapshot.milestoneFrequency),
+            reservedScheduleSlots: collectOccupiedDailySlots(goals, snapshot.id),
           });
           const regenBatch = Date.now();
           setGoals((cur) =>
@@ -377,6 +379,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
                   checkpointTitles: snapshot.checkpoints.map((c) => c.title),
                   dailyQuestCount: questCount,
                   milestoneFrequency: parseMilestoneFrequency(snapshot.milestoneFrequency),
+                  reservedScheduleSlots: collectOccupiedDailySlots(prev, goalId),
                 });
                 const regenBatch = Date.now();
                 setGoals((cur) =>
