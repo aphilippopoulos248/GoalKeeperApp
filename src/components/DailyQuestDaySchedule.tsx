@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { DailyQuestEntry } from '../context/QuestProgressContext';
 import type { ThemeColors, ThemeMode } from '../theme/colors';
@@ -12,6 +12,8 @@ import {
 
 const MINUTES_PER_DAY = 24 * 60;
 const PIXELS_PER_MINUTE = 0.72;
+/** Viewport height for the day column; full day scrolls inside. */
+const SCHEDULE_TIMELINE_MAX_HEIGHT = 400;
 const GUTTER_WIDTH = 54;
 const HOUR_COUNT = 24;
 
@@ -117,11 +119,13 @@ export function DailyQuestDaySchedule({
       <Text style={[styles.subTitle, { color: colors.textSecondary }]}>
         12:00 AM – 11:59 PM
       </Text>
-      {/*
-        Full-day timeline height is laid out here; the screen’s outer ScrollView
-        (Screen.tsx) scrolls the Menu so users can reach late-night hours.
-      */}
-      <View style={styles.timeline}>
+      <ScrollView
+        style={{ maxHeight: SCHEDULE_TIMELINE_MAX_HEIGHT }}
+        contentContainerStyle={styles.timelineScrollContent}
+        showsVerticalScrollIndicator
+        nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.row}>
           <View style={[styles.gutter, { width: GUTTER_WIDTH }]}>
             {Array.from({ length: HOUR_COUNT }, (_, h) => (
@@ -164,7 +168,7 @@ export function DailyQuestDaySchedule({
               const top = b.start * PIXELS_PER_MINUTE;
               const height = Math.max(
                 (b.end - b.start) * PIXELS_PER_MINUTE,
-                28,
+                1,
               );
               const laneW = 100 / b.laneCount;
               const leftPct = (b.lane / b.laneCount) * 100;
@@ -215,7 +219,7 @@ export function DailyQuestDaySchedule({
                             textDecorationLine: b.done ? 'line-through' : 'none',
                           },
                         ]}
-                        numberOfLines={3}
+                        numberOfLines={2}
                       >
                         {b.title}
                       </Text>
@@ -232,7 +236,7 @@ export function DailyQuestDaySchedule({
             })}
           </View>
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -256,7 +260,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.sm,
   },
-  timeline: {
+  timelineScrollContent: {
     paddingBottom: spacing.md,
   },
   row: {
@@ -289,21 +293,21 @@ const styles = StyleSheet.create({
     paddingLeft: 4,
   },
   blockInner: {
-    flex: 1,
+    height: '100%',
     borderRadius: radius.sm,
     borderWidth: 1,
     overflow: 'hidden',
     flexDirection: 'row',
-    minHeight: '100%',
   },
   accentBar: {
     width: 4,
   },
   blockTextWrap: {
     flex: 1,
-    paddingVertical: 6,
+    paddingVertical: 4,
     paddingHorizontal: 8,
     justifyContent: 'flex-start',
+    minWidth: 0,
   },
   blockTitle: {
     fontSize: 13,
