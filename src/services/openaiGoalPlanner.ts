@@ -331,7 +331,12 @@ Fields:
 - relevant: string (SMART Relevant)
 - timeBound: string (one clear sentence: deadline and horizon in plain language)
 - timeBoundCritique: string (one short honest critique of whether the deadline is realistic for the outcome; suggest adjustment if needed)
-- checkpoints: array of { "weekOffset": number, "label": string }. weekOffset is the week number from the start (1 = end of week 1). ${checkpointCadence} label is the outcome for that period (no "Week N:" prefix).
+- checkpoints: array of { "weekOffset": number, "label": string }. weekOffset is the week number from the start (1 = end of week 1). ${checkpointCadence} Each "label" is ONE milestone title (no "Week N:" prefix).
+
+Milestones vs daily quests (critical):
+- Milestones (checkpoint labels) are **major sub-goals**—noticeably **harder and braver** than any single daily quest. They should feel like **real progress** and often push the user **outside their comfort zone** in a way that fits the goal (e.g. for “improve social skills”: daily quests might be “practice a short conversation” or “watch a video on body language”, while a milestone might be “attend a public meetup or social event alone”). Milestones are **not** small home exercises; they are **challenge moments** the user would not do every day.
+- Daily quests are **smaller, repeatable, preparatory steps** (practice, reflection, learning, low-stakes rehearsals) that **build toward** those milestones. They must **not** copy the same wording as a milestone; they prepare the user for the bigger step later.
+- Each milestone label must be a **single clear, verifiable challenge** for that period; avoid vague labels like “keep going”.
 
 Rules:
 - Use the user's title and description; make SMART fields concrete.
@@ -355,10 +360,11 @@ function buildRegenSystem(dailyQuestCount: number): string {
 dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder", "startMinute", "durationMinutes" } with points 2–6, dayOrder 0–999, startMinute 0–1439, durationMinutes 15–120. Blocks must not overlap within the array; prefer 06:00–22:00. If the user JSON includes reservedScheduleSlots, treat each entry as a busy half-open interval [startMinute, endMinute)—your quests must not overlap those (one quest at a time globally).
 
 Rules:
-- The user message includes milestoneFrequency (weekly / biweekly / monthly). Align daily quest pacing and tone with that milestone cadence (e.g. smaller steps for weekly checkpoints vs monthly).
-- Quests must support the user's goal and current milestones.
+- The user JSON includes "checkpointTitles": the existing milestone names for this goal. Daily quests must be **smaller preparatory steps** (practice, study, low-stakes drills) that **support** those milestones—**not** duplicate them. Daily quests should feel **easier** than completing a milestone; milestones stay the **bold stretch** challenges.
+- The user message includes milestoneFrequency (weekly / biweekly / monthly). Align daily quest pacing and tone with that cadence (e.g. smaller daily steps when milestones are weekly vs monthly).
+- Quests must support the user's goal and build skills toward the **next** milestones the user has not yet reached.
 - If completedCheckpointCount is 0, quests are VERY EASY.
-- Higher completedCheckpointCount means noticeably harder (longer or more demanding) daily actions, still realistic.
+- Higher completedCheckpointCount means noticeably harder (longer or more demanding) daily actions, still realistic—and still **below** the bar of a full milestone challenge.
 - Each quest must be specific to this goal’s title and description (not generic advice).
 - Each quest MUST include dayOrder 0–999; the Menu sorts all goals’ quests ascending (morning first, evening last).
 - Each quest MUST include startMinute and durationMinutes (non-overlapping within the batch; align start times with dayOrder).
