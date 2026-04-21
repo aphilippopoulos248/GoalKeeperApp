@@ -6,94 +6,84 @@ import { useQuestProgress } from '../context/QuestProgressContext';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { spacing } from '../theme/spacing';
 import type { Checkpoint, Quest } from '../types';
+import {
+  computeActiveSegment,
+  computeQuestRatio,
+  computeTrackLayout,
+  DOT_R,
+  GOAL_R,
+  TRACK_LEFT,
+  visibleCheckpointIndices,
+} from '../utils/milestoneProgressLayout';
 
-const MAX_VISIBLE = 12;
 const ROW_HEIGHT = 22;
-const DOT_R = 5;
-const GOAL_R = 6.5;
 const TRACK_STROKE = 2;
 const QUEST_STROKE = 1.5;
-const TRACK_LEFT = 2;
-
-function visibleCheckpointIndices(total: number): number[] {
-  if (total <= 0) return [];
-  if (total <= MAX_VISIBLE) {
-    return Array.from({ length: total }, (_, i) => i);
-  }
-  return Array.from({ length: MAX_VISIBLE }, (_, k) =>
-    Math.round((k * (total - 1)) / (MAX_VISIBLE - 1)),
-  );
-}
 
 type Props = {
   /** Passed for call-site consistency; milestone math uses `checkpoints` and `dailyQuests`. */
   goalId: string;
   checkpoints: Checkpoint[];
   dailyQuests?: Quest[];
+  /** When false, every checkpoint gets a dot (matches a full milestone list). Default true. */
+  subsampling?: boolean;
+  /** Fires with the measured inner track width (for unlock math on other screens). */
+  onTrackWidthChange?: (width: number) => void;
 };
 
 export function GoalMilestoneProgress({
   goalId: _goalId,
   checkpoints,
   dailyQuests,
+  subsampling = true,
+  onTrackWidthChange,
 }: Props) {
   const { colors } = useAppTheme();
   const { completed } = useQuestProgress();
   const [trackWidth, setTrackWidth] = useState(0);
 
-  const onTrackLayout = useCallback((e: LayoutChangeEvent) => {
-    setTrackWidth(e.nativeEvent.layout.width);
-  }, []);
+  const onTrackLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const w = e.nativeEvent.layout.width;
+      setTrackWidth(w);
+      onTrackWidthChange?.(w);
+    },
+    [onTrackWidthChange],
+  );
 
   const total = checkpoints.length;
-  const indices = visibleCheckpointIndices(total);
+  const indices = useMemo(() => {
+    if (!subsampling) {
+      return Array.from({ length: total }, (_, i) => i);
+    }
+    return visibleCheckpointIndices(total);
+  }, [subsampling, total]);
   const slots = indices.map((idx) => checkpoints[idx]);
   const n = slots.length;
   const cy = ROW_HEIGHT / 2;
 
-  const dailies = useMemo(
-    () => (dailyQuests ?? []).filter((q) => q.kind === 'daily'),
+  const questRatio = useMemo(
+    () => computeQuestRatio(dailyQuests, completed),
+    [dailyQuests, completed],
+  );
+  const questTotal = useMemo(
+    () => (dailyQuests ?? []).filter((q) => q.kind === 'daily').length,
     [dailyQuests],
   );
-  const questTotal = dailies.length;
-  const questDone = useMemo(
-    () => dailies.filter((q) => completed[q.id]).length,
-    [dailies, completed],
+  const questDone = useMemo(() => {
+    const dailies = (dailyQuests ?? []).filter((q) => q.kind === 'daily');
+    return dailies.filter((q) => completed[q.id]).length;
+  }, [dailyQuests, completed]);
+
+  const layout = useMemo(
+    () => computeTrackLayout(trackWidth, n),
+    [trackWidth, n],
   );
-  const questRatio = questTotal > 0 ? questDone / questTotal : 0;
-
-  const layout = useMemo(() => {
-    if (trackWidth <= 0 || n < 1) return null;
-    const rightPad = GOAL_R + 3;
-    const lastDotX = Math.max(TRACK_LEFT + GOAL_R + 4, trackWidth - rightPad);
-    const leadMin = Math.min(14, Math.max(10, trackWidth * 0.06));
-    const firstDotX = Math.max(
-      TRACK_LEFT + 8,
-      Math.min(lastDotX - 4, TRACK_LEFT + leadMin),
-    );
-
-    const dotX = (i: number): number => {
-      if (n <= 1) return lastDotX;
-      return firstDotX + (i / (n - 1)) * (lastDotX - firstDotX);
-    };
-
-    const xs = Array.from({ length: n }, (_, i) => dotX(i));
-    return { lastDotX, firstDotX, dotX, xs, trackEndX: lastDotX };
-  }, [trackWidth, n]);
 
   const activeSegment = useMemo(() => {
-    if (!layout || n < 1) return null;
-    const { xs, trackEndX } = layout;
-    if (!slots[0].done) {
-      return { x1: TRACK_LEFT, x2: xs[0] };
-    }
-    for (let i = 0; i < n - 1; i += 1) {
-      if (!(slots[i].done && slots[i + 1].done)) {
-        return { x1: xs[i], x2: xs[i + 1] };
-      }
-    }
-    return null;
-  }, [layout, n, slots]);
+    if (!layout) return null;
+    return computeActiveSegment(slots, layout.xs, TRACK_LEFT);
+  }, [layout, slots]);
 
   if (total === 0) {
     return null;

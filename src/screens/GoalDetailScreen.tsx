@@ -1,19 +1,59 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { GoalMilestoneProgress } from '../components/GoalMilestoneProgress';
 import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
+import { useQuestProgress } from '../context/QuestProgressContext';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
+import {
+  computeBarHeadX,
+  computeQuestRatio,
+  computeTrackLayout,
+  isCheckpointUnlockedByBar,
+  TRACK_LEFT,
+} from '../utils/milestoneProgressLayout';
 
 type Props = NativeStackScreenProps<GoalsStackParamList, 'GoalDetail'>;
 
 export function GoalDetailScreen({ route, navigation }: Props) {
   const { colors } = useAppTheme();
   const { getGoalById, removeGoal, toggleCheckpoint } = useActiveGoals();
+  const { completed } = useQuestProgress();
+  const [trackWidth, setTrackWidth] = useState(0);
   const g = getGoalById(route.params.goalId);
+
+  useEffect(() => {
+    setTrackWidth(0);
+  }, [route.params.goalId]);
+
+  const questRatio = useMemo(
+    () => (g ? computeQuestRatio(g.dailyQuests, completed) : 0),
+    [g, completed],
+  );
+
+  const layout = useMemo(
+    () =>
+      g && g.checkpoints.length > 0
+        ? computeTrackLayout(trackWidth, g.checkpoints.length)
+        : null,
+    [g, trackWidth],
+  );
+
+  const headX = useMemo(() => {
+    if (!g || !layout) return 0;
+    return computeBarHeadX(
+      g.checkpoints,
+      layout.xs,
+      questRatio,
+      TRACK_LEFT,
+      layout.trackEndX,
+    );
+  }, [g, layout, questRatio]);
 
   if (!g) {
     return (
@@ -72,40 +112,89 @@ export function GoalDetailScreen({ route, navigation }: Props) {
         <Text style={[styles.emptyCheckpoints, { color: colors.textSecondary }]}>
           No checkpoints yet.
         </Text>
-      ) : null}
-      {g.checkpoints.map((c) => (
-        <Pressable
-          key={c.id}
-          accessibilityRole="button"
-          accessibilityLabel={`Checkpoint: ${c.title}. ${c.done ? 'Completed' : 'Not completed'}. Tap to toggle.`}
-          onPress={() => toggleCheckpoint(g.id, c.id)}
-          style={({ pressed }) => [
-            styles.checkpoint,
-            {
-              backgroundColor: colors.surface,
-              borderColor: colors.border,
-            },
-            pressed && { opacity: 0.88 },
-          ]}
-        >
-          <View
-            style={[
-              styles.dot,
-              {
-                backgroundColor: c.done ? colors.success : colors.border,
-              },
-            ]}
+      ) : (
+        <>
+          <GoalMilestoneProgress
+            goalId={g.id}
+            checkpoints={g.checkpoints}
+            dailyQuests={g.dailyQuests}
+            subsampling={false}
+            onTrackWidthChange={setTrackWidth}
           />
-          <Text
-            style={[
-              styles.checkpointText,
-              { color: c.done ? colors.text : colors.textSecondary },
-            ]}
-          >
-            {c.title}
-          </Text>
-        </Pressable>
-      ))}
+          {g.checkpoints.map((c, i) => {
+            const unlocked = isCheckpointUnlockedByBar(c, i, layout, headX);
+            const lockedLabel = `Checkpoint: ${c.title}. Locked. Complete daily quests to advance the progress bar until it reaches this milestone.`;
+            const openLabel = `Checkpoint: ${c.title}. ${c.done ? 'Completed' : 'Not completed'}. Tap to toggle.`;
+
+            return unlocked ? (
+              <Pressable
+                key={c.id}
+                accessibilityRole="button"
+                accessibilityLabel={openLabel}
+                onPress={() => toggleCheckpoint(g.id, c.id)}
+                style={({ pressed }) => [
+                  styles.checkpoint,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                  pressed && { opacity: 0.88 },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.dot,
+                    {
+                      backgroundColor: c.done ? colors.success : colors.border,
+                    },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.checkpointText,
+                    { color: c.done ? colors.text : colors.textSecondary },
+                  ]}
+                >
+                  {c.title}
+                </Text>
+              </Pressable>
+            ) : (
+              <View
+                key={c.id}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: true }}
+                accessibilityLabel={lockedLabel}
+                style={[styles.checkpoint, styles.checkpointLocked, {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                }]}
+              >
+                <View
+                  style={[
+                    styles.dot,
+                    { backgroundColor: colors.border },
+                  ]}
+                />
+                <Text
+                  style={[styles.checkpointText, { color: colors.textSecondary }]}
+                >
+                  {c.title}
+                </Text>
+                <Text style={[styles.lockedHint, { color: colors.textSecondary }]}>
+                  Locked
+                </Text>
+                <Ionicons
+                  name="lock-closed"
+                  size={18}
+                  color={colors.textSecondary}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no"
+                />
+              </View>
+            );
+          })}
+        </>
+      )}
 
       <View
         style={[
@@ -244,6 +333,14 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     lineHeight: 20,
+  },
+  checkpointLocked: {
+    opacity: 0.62,
+  },
+  lockedHint: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginRight: spacing.xs,
   },
   aiCard: {
     marginTop: spacing.md,
