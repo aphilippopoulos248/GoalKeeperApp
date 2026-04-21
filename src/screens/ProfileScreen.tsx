@@ -1,5 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useState } from 'react';
+import type { User } from '@supabase/supabase-js';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -20,6 +21,16 @@ import type { ProfileStackParamList } from '../navigation/profileStackTypes';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'ProfileMain'>;
 
+function displayNameFromUser(user: User): string {
+  const raw = user.user_metadata?.username;
+  const fromUsername =
+    typeof raw === 'string' && raw.trim() ? raw.trim() : '';
+  if (fromUsername) return fromUsername;
+  const local = user.email?.split('@')[0]?.trim();
+  if (local) return local;
+  return 'Player';
+}
+
 export function ProfileScreen({ navigation }: Props) {
   const { colors, mode } = useAppTheme();
   const { lifetimeQuestPoints, questsCompletedCount } = useQuestProgress();
@@ -27,6 +38,41 @@ export function ProfileScreen({ navigation }: Props) {
   const goalsCompletedCount = goals.filter((g) => g.completed).length;
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState<string | null>(null);
+  const [profileEmail, setProfileEmail] = useState<string | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const applyUser = (user: User | null) => {
+      if (cancelled) return;
+      if (!user) {
+        setProfileName(null);
+        setProfileEmail(null);
+        setProfileLoading(false);
+        return;
+      }
+      setProfileName(displayNameFromUser(user));
+      setProfileEmail(user.email ?? null);
+      setProfileLoading(false);
+    };
+
+    void supabase.auth.getUser().then(({ data: { user } }) => {
+      applyUser(user);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      applyUser(session?.user ?? null);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   const onLogOut = async () => {
     setLogoutError(null);
@@ -67,7 +113,17 @@ export function ProfileScreen({ navigation }: Props) {
           <BronzeRankIcon size={200} />
         </View>
 
-        <Text style={[styles.displayName, { color: colors.text }]}>Alex Runner</Text>
+        {profileLoading ? (
+          <ActivityIndicator
+            style={styles.profileNameLoader}
+            size="small"
+            color={colors.primary}
+          />
+        ) : (
+          <Text style={[styles.displayName, { color: colors.text }]}>
+            {profileName ?? 'Player'}
+          </Text>
+        )}
         <Text style={[styles.points, { color: colors.textSecondary }]}>
           {lifetimeQuestPoints.toLocaleString()}
         </Text>
@@ -85,7 +141,13 @@ export function ProfileScreen({ navigation }: Props) {
             Account info
           </Text>
           <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Email</Text>
-          <Text style={[styles.fieldValue, { color: colors.text }]}>alex@example.com</Text>
+          {profileLoading ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <Text style={[styles.fieldValue, { color: colors.text }]}>
+              {profileEmail ?? '—'}
+            </Text>
+          )}
 
           <View style={styles.statsRow}>
             <View style={styles.statColumn}>
@@ -183,6 +245,10 @@ const styles = StyleSheet.create({
     width: 160,
     height: 160,
     borderRadius: 80,
+  },
+  profileNameLoader: {
+    marginBottom: spacing.xs,
+    minHeight: 32,
   },
   displayName: {
     fontSize: 26,
