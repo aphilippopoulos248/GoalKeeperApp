@@ -1,3 +1,4 @@
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,8 +16,11 @@ import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 
 import { BronzeRankIcon } from '../components/ranks/BronzeRankIcon';
+import type { ProfileStackParamList } from '../navigation/profileStackTypes';
 
-export function ProfileScreen() {
+type Props = NativeStackScreenProps<ProfileStackParamList, 'ProfileMain'>;
+
+export function ProfileScreen({ navigation }: Props) {
   const { colors, mode } = useAppTheme();
   const { lifetimeQuestPoints, questsCompletedCount } = useQuestProgress();
   const { goals } = useActiveGoals();
@@ -109,6 +113,25 @@ export function ProfileScreen() {
               {logoutError}
             </Text>
           ) : null}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            onPress={() => navigation.navigate('Settings')}
+            disabled={loggingOut}
+            style={({ pressed }) => [
+              styles.settingsButton,
+              {
+                borderColor: colors.primary,
+                backgroundColor: colors.surfaceElevated,
+              },
+              (pressed || loggingOut) && { opacity: 0.85 },
+            ]}
+          >
+            <Text style={[styles.settingsLabel, { color: colors.primary }]}>
+              Settings
+            </Text>
+          </Pressable>
 
           <Pressable
             accessibilityRole="button"
@@ -235,6 +258,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: spacing.sm,
     color: '#ef4444',
+  },
+  settingsButton: {
+    marginTop: spacing.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    minHeight: 52,
+    justifyContent: 'center',
+  },
+  settingsLabel: {
+    fontSize: 17,
+    fontWeight: '700',
   },
   logoutButton: {
     marginTop: spacing.sm,

@@ -5,8 +5,7 @@ import { GoalsStack } from './GoalsStack';
 import { DayScheduleScreen } from '../screens/DayScheduleScreen';
 import { FriendsScreen } from '../screens/FriendsScreen';
 import { MenuScreen } from '../screens/MenuScreen';
-import { ProfileScreen } from '../screens/ProfileScreen';
-import { SettingsScreen } from '../screens/SettingsScreen';
+import { ProfileStack } from './ProfileStack';
 import { useAppTheme } from '../theme/ThemeProvider';
 
 export type RootTabParamList = {
@@ -15,7 +14,6 @@ export type RootTabParamList = {
   ActiveGoals: undefined;
   Friends: undefined;
   Profile: undefined;
-  Settings: undefined;
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -76,19 +74,10 @@ export function RootTabs() {
       />
       <Tab.Screen
         name="Profile"
-        component={ProfileScreen}
+        component={ProfileStack}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person-outline" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Settings"
-        component={SettingsScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="settings-outline" size={size} color={color} />
           ),
         }}
       />

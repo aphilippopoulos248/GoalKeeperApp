@@ -1,4 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useState } from 'react';
 import {
   Modal,
@@ -10,6 +12,7 @@ import {
 } from 'react-native';
 
 import { Screen } from '../components/Screen';
+import type { ProfileStackParamList } from '../navigation/profileStackTypes';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 
@@ -24,7 +27,13 @@ const DIFFICULTY_OPTIONS: {
   { id: 'hard', label: 'Hard' },
 ];
 
+type SettingsNav = NativeStackNavigationProp<
+  ProfileStackParamList,
+  'Settings'
+>;
+
 export function SettingsScreen() {
+  const navigation = useNavigation<SettingsNav>();
   const { colors, mode, setMode } = useAppTheme();
   const dark = mode === 'dark';
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
@@ -35,6 +44,18 @@ export function SettingsScreen() {
 
   return (
     <Screen>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Back to profile"
+        onPress={() => navigation.goBack()}
+        style={({ pressed }) => [
+          styles.backRow,
+          pressed && { opacity: 0.7 },
+        ]}
+      >
+        <Ionicons name="chevron-back" size={22} color={colors.primary} />
+        <Text style={[styles.backLabel, { color: colors.primary }]}>Profile</Text>
+      </Pressable>
       <View style={styles.stack}>
         <View
           style={[
@@ -158,6 +179,18 @@ export function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
+  backRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.md,
+    alignSelf: 'flex-start',
+    paddingVertical: spacing.xs,
+  },
+  backLabel: {
+    fontSize: 17,
+    fontWeight: '600',
+  },
   stack: {
     gap: spacing.md,
   },
