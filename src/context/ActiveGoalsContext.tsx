@@ -63,6 +63,7 @@ type ActiveGoalsContextValue = {
   ) => void;
   lifeScheduleSlots: ReservedScheduleSlot[];
   applyLifeScheduleMessage: (message: string) => Promise<void>;
+  clearLifeScheduleConstraints: () => Promise<void>;
 };
 
 const ActiveGoalsContext = createContext<ActiveGoalsContextValue | null>(null);
@@ -403,6 +404,50 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     }
   }, [goals, storageReady, lifeScheduleSlots]);
 
+  const reflowDailyQuestsWithLifeSlots = useCallback(
+    async (lifeSlots: ReservedScheduleSlot[]) => {
+      const today = new Date();
+      let working: Goal[] = goalsRef.current.map((g) => ({
+        ...g,
+        dailyQuests: g.dailyQuests?.map((q) => ({ ...q })),
+      }));
+      const ordered = working.filter(
+        (g) =>
+          !g.completed &&
+          (g.dailyQuests?.filter((q) => q.kind === 'daily').length ?? 0) > 0,
+      );
+      for (const g of ordered) {
+        const dq = g.dailyQuests!.filter((q) => q.kind === 'daily');
+        const reserved = mergeLifeSlotsWithOccupiedGoals(lifeSlots, working, g.id);
+        try {
+          const planned = await repositionDailyQuestsPreservingQuests({
+            goalTitle: g.title,
+            goalDescription: g.description,
+            completedCheckpointCount: g.checkpoints.filter((c) => c.done).length,
+            milestoneFrequency: parseMilestoneFrequency(g.milestoneFrequency),
+            checkpointTitles: g.checkpoints.map((c) => c.title),
+            quests: dq,
+            reservedScheduleSlots: reserved,
+            todayIso: today.toISOString(),
+            targetDateIso: effectiveTargetDateIso(g),
+          });
+          working = working.map((goal) => {
+            if (goal.id !== g.id) return goal;
+            return {
+              ...goal,
+              dailyQuests: mergeDailyQuestSchedule(goal.dailyQuests!, dq, planned),
+            };
+          });
+        } catch {
+          /* leave goal unchanged */
+        }
+      }
+      setGoals(working);
+      goalsRef.current = working;
+    },
+    [],
+  );
+
   const addGoal = useCallback((input: NewGoalInput, options?: AddGoalOptions) => {
     setGoals((prev) => [buildGoalFromInput(input, options?.enrichment), ...prev]);
   }, []);
@@ -447,56 +492,28 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     [],
   );
 
-  const applyLifeScheduleMessage = useCallback(async (message: string) => {
-    const trimmed = message.trim();
-    if (!trimmed) return;
-    const today = new Date();
-    const nextSlots = await parseLifeBusySlotsFromMessage({
-      message: trimmed,
-      priorBusyIntervals: lifeScheduleSlotsRef.current,
-      todayIso: today.toISOString(),
-    });
-    setLifeScheduleSlots(nextSlots);
-    lifeScheduleSlotsRef.current = nextSlots;
+  const applyLifeScheduleMessage = useCallback(
+    async (message: string) => {
+      const trimmed = message.trim();
+      if (!trimmed) return;
+      const today = new Date();
+      const nextSlots = await parseLifeBusySlotsFromMessage({
+        message: trimmed,
+        priorBusyIntervals: lifeScheduleSlotsRef.current,
+        todayIso: today.toISOString(),
+      });
+      setLifeScheduleSlots(nextSlots);
+      lifeScheduleSlotsRef.current = nextSlots;
+      await reflowDailyQuestsWithLifeSlots(nextSlots);
+    },
+    [reflowDailyQuestsWithLifeSlots],
+  );
 
-    let working: Goal[] = goalsRef.current.map((g) => ({
-      ...g,
-      dailyQuests: g.dailyQuests?.map((q) => ({ ...q })),
-    }));
-    const ordered = working.filter(
-      (g) =>
-        !g.completed &&
-        (g.dailyQuests?.filter((q) => q.kind === 'daily').length ?? 0) > 0,
-    );
-    for (const g of ordered) {
-      const dq = g.dailyQuests!.filter((q) => q.kind === 'daily');
-      const reserved = mergeLifeSlotsWithOccupiedGoals(nextSlots, working, g.id);
-      try {
-        const planned = await repositionDailyQuestsPreservingQuests({
-          goalTitle: g.title,
-          goalDescription: g.description,
-          completedCheckpointCount: g.checkpoints.filter((c) => c.done).length,
-          milestoneFrequency: parseMilestoneFrequency(g.milestoneFrequency),
-          checkpointTitles: g.checkpoints.map((c) => c.title),
-          quests: dq,
-          reservedScheduleSlots: reserved,
-          todayIso: today.toISOString(),
-          targetDateIso: effectiveTargetDateIso(g),
-        });
-        working = working.map((goal) => {
-          if (goal.id !== g.id) return goal;
-          return {
-            ...goal,
-            dailyQuests: mergeDailyQuestSchedule(goal.dailyQuests!, dq, planned),
-          };
-        });
-      } catch {
-        /* leave goal unchanged */
-      }
-    }
-    setGoals(working);
-    goalsRef.current = working;
-  }, []);
+  const clearLifeScheduleConstraints = useCallback(async () => {
+    setLifeScheduleSlots([]);
+    lifeScheduleSlotsRef.current = [];
+    await reflowDailyQuestsWithLifeSlots([]);
+  }, [reflowDailyQuestsWithLifeSlots]);
 
   const toggleCheckpoint = useCallback((goalId: string, checkpointId: string) => {
     setGoals((prev) => {
@@ -585,6 +602,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       updateDailyQuestSchedule,
       lifeScheduleSlots,
       applyLifeScheduleMessage,
+      clearLifeScheduleConstraints,
     }),
     [
       goals,
@@ -595,6 +613,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       updateDailyQuestSchedule,
       lifeScheduleSlots,
       applyLifeScheduleMessage,
+      clearLifeScheduleConstraints,
     ],
   );
 

@@ -12,10 +12,16 @@ import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { GoalPlannerError } from '../services/openaiGoalPlanner';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
+import { formatScheduleRange } from '../utils/dailyQuestSchedule';
 
 export function ScheduleAiAssistant() {
   const { colors } = useAppTheme();
-  const { applyLifeScheduleMessage, goals } = useActiveGoals();
+  const {
+    applyLifeScheduleMessage,
+    clearLifeScheduleConstraints,
+    goals,
+    lifeScheduleSlots,
+  } = useActiveGoals();
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +57,25 @@ export function ScheduleAiAssistant() {
       setLoading(false);
     }
   }, [text, hasDailies, loading, applyLifeScheduleMessage]);
+
+  const onClear = useCallback(async () => {
+    if (lifeScheduleSlots.length === 0 || loading) return;
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await clearLifeScheduleConstraints();
+      setSuccess('Constraints cleared. Schedule rebalanced.');
+    } catch (e) {
+      setError(
+        e instanceof GoalPlannerError
+          ? e.message
+          : 'Something went wrong. Check your connection and API key.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [lifeScheduleSlots.length, loading, clearLifeScheduleConstraints]);
 
   return (
     <View
@@ -99,6 +124,39 @@ export function ScheduleAiAssistant() {
       >
         <Text style={styles.buttonLabel}>
           {loading ? 'Updating…' : 'Update schedule'}
+        </Text>
+      </Pressable>
+      {lifeScheduleSlots.length > 0 ? (
+        <View style={styles.constraintsBlock}>
+          <Text style={[styles.constraintsTitle, { color: colors.text }]}>
+            Current constraints
+          </Text>
+          {lifeScheduleSlots.map((s) => (
+            <Text
+              key={`${s.startMinute}-${s.endMinute}`}
+              style={[styles.constraintRow, { color: colors.textSecondary }]}
+            >
+              {`\u2022 ${formatScheduleRange(s.startMinute, s.endMinute)}`}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+      <Pressable
+        onPress={() => {
+          void onClear();
+        }}
+        disabled={lifeScheduleSlots.length === 0 || loading}
+        style={({ pressed }) => [
+          styles.clearButton,
+          {
+            borderColor: colors.border,
+            opacity:
+              lifeScheduleSlots.length === 0 || loading ? 0.45 : pressed ? 0.85 : 1,
+          },
+        ]}
+      >
+        <Text style={[styles.clearButtonLabel, { color: colors.text }]}>
+          Clear constraints
         </Text>
       </Pressable>
       {!hasDailies ? (
@@ -153,6 +211,30 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     paddingVertical: spacing.sm,
     alignItems: 'center',
+  },
+  constraintsBlock: {
+    marginTop: spacing.md,
+  },
+  constraintsTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: spacing.xs,
+  },
+  constraintRow: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  clearButton: {
+    marginTop: spacing.md,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  clearButtonLabel: {
+    fontSize: 16,
+    fontWeight: '700',
   },
   buttonLabel: {
     color: '#fff',
