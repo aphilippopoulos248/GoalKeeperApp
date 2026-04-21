@@ -65,6 +65,30 @@ function buildLayout(
       done: !!completed[e.quest.id],
     };
   });
+  // #region agent log
+  fetch('http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': '1b4fdd',
+    },
+    body: JSON.stringify({
+      sessionId: '1b4fdd',
+      location: 'DailyQuestDaySchedule.tsx:buildLayout',
+      message: 'schedule block intervals',
+      data: {
+        blocks: raw.map((r) => ({
+          title: r.title.slice(0, 48),
+          start: r.start,
+          end: r.end,
+          spanMin: r.end - r.start,
+        })),
+      },
+      timestamp: Date.now(),
+      hypothesisId: 'H2',
+    }),
+  }).catch(() => {});
+  // #endregion
   raw.sort((a, b) => a.start - b.start || a.end - b.end);
   const laneEnds: number[] = [];
   const withLanes = raw.map((b) => {

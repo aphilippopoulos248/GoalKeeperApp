@@ -207,6 +207,29 @@ function finalizePlannerDailyQuests(
     busy.push({ start: startMinute, end: endPlaced });
     out.push({ ...q, startMinute, durationMinutes });
   }
+  // #region agent log
+  fetch('http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': '1b4fdd',
+    },
+    body: JSON.stringify({
+      sessionId: '1b4fdd',
+      location: 'openaiGoalPlanner.ts:finalizePlannerDailyQuests:out',
+      message: 'finalized daily quest slots',
+      data: {
+        quests: out.map((q) => ({
+          title: q.title.slice(0, 48),
+          startMinute: q.startMinute,
+          durationMinutes: q.durationMinutes,
+        })),
+      },
+      timestamp: Date.now(),
+      hypothesisId: 'H1',
+    }),
+  }).catch(() => {});
+  // #endregion
   return out;
 }
 
