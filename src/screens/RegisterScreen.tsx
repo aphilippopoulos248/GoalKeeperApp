@@ -15,26 +15,39 @@ import type { RootStackParamList } from '../navigation/RootStack';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'Register'>;
 
-export function LoginScreen({ navigation }: Props) {
+export function RegisterScreen({ navigation }: Props) {
   const { colors } = useAppTheme();
   const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const onLogin = async () => {
+  const onRegister = async () => {
     setErrorMessage(null);
+    setSuccessMessage(null);
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
+        options: {
+          data: { username: username.trim() },
+        },
       });
       if (error) {
         setErrorMessage(error.message);
+        return;
       }
+      if (data.session) {
+        return;
+      }
+      setSuccessMessage(
+        'Check your email to finish signing up, then log in with your password.',
+      );
     } finally {
       setLoading(false);
     }
@@ -42,7 +55,7 @@ export function LoginScreen({ navigation }: Props) {
 
   return (
     <Screen>
-      <Text style={[styles.heading, { color: colors.text }]}>Log in</Text>
+      <Text style={[styles.heading, { color: colors.text }]}>Create account</Text>
 
       <Text style={[styles.label, { color: colors.textSecondary }]}>
         Email
@@ -69,6 +82,29 @@ export function LoginScreen({ navigation }: Props) {
       />
 
       <Text style={[styles.label, { color: colors.textSecondary }]}>
+        Username
+      </Text>
+      <TextInput
+        value={username}
+        onChangeText={setUsername}
+        placeholder="Username"
+        placeholderTextColor={colors.textSecondary}
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoComplete="username"
+        textContentType="username"
+        editable={!loading}
+        style={[
+          styles.input,
+          {
+            color: colors.text,
+            backgroundColor: colors.surfaceElevated,
+            borderColor: colors.border,
+          },
+        ]}
+      />
+
+      <Text style={[styles.label, { color: colors.textSecondary }]}>
         Password
       </Text>
       <TextInput
@@ -79,8 +115,8 @@ export function LoginScreen({ navigation }: Props) {
         secureTextEntry
         autoCapitalize="none"
         autoCorrect={false}
-        autoComplete="password"
-        textContentType="password"
+        autoComplete="password-new"
+        textContentType="newPassword"
         editable={!loading}
         style={[
           styles.input,
@@ -98,11 +134,20 @@ export function LoginScreen({ navigation }: Props) {
         </Text>
       ) : null}
 
+      {successMessage ? (
+        <Text
+          style={[styles.success, { color: colors.textSecondary }]}
+          accessibilityLiveRegion="polite"
+        >
+          {successMessage}
+        </Text>
+      ) : null}
+
       <View style={styles.buttonWrap}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Log in"
-          onPress={() => void onLogin()}
+          accessibilityLabel="Create account"
+          onPress={() => void onRegister()}
           disabled={loading}
           style={({ pressed }) => [
             styles.submit,
@@ -114,7 +159,7 @@ export function LoginScreen({ navigation }: Props) {
             <ActivityIndicator color="#ffffff" />
           ) : (
             <Text style={[styles.submitLabel, { color: '#ffffff' }]}>
-              Log in
+              Register
             </Text>
           )}
         </Pressable>
@@ -122,8 +167,8 @@ export function LoginScreen({ navigation }: Props) {
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Register"
-        onPress={() => navigation.navigate('Register')}
+        accessibilityLabel="Go to log in"
+        onPress={() => navigation.navigate('Login')}
         disabled={loading}
         style={({ pressed }) => [
           styles.secondaryLink,
@@ -131,7 +176,7 @@ export function LoginScreen({ navigation }: Props) {
         ]}
       >
         <Text style={[styles.secondaryLinkText, { color: colors.primary }]}>
-          Create an account
+          Already have an account? Log in
         </Text>
       </Pressable>
     </Screen>
@@ -164,6 +209,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: spacing.sm,
     color: '#ef4444',
+  },
+  success: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: spacing.sm,
   },
   buttonWrap: {
     marginTop: spacing.sm,

@@ -6,11 +6,13 @@ import { ActivityIndicator, View } from 'react-native';
 
 import { supabase } from '../lib/supabase';
 import { LoginScreen } from '../screens/LoginScreen';
+import { RegisterScreen } from '../screens/RegisterScreen';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { RootTabs, type RootTabParamList } from './RootTabs';
 
 export type RootStackParamList = {
   Login: undefined;
+  Register: undefined;
   Main: NavigatorScreenParams<RootTabParamList> | undefined;
 };
 
@@ -56,7 +58,10 @@ export function RootStack() {
       {session ? (
         <Stack.Screen name="Main" component={RootTabs} />
       ) : (
-        <Stack.Screen name="Login" component={LoginScreen} />
+        <>
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="Register" component={RegisterScreen} />
+        </>
       )}
     </Stack.Navigator>
   );

@@ -1,10 +1,18 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { useQuestProgress } from '../context/QuestProgressContext';
+import { supabase } from '../lib/supabase';
 import { useAppTheme } from '../theme/ThemeProvider';
-import { spacing } from '../theme/spacing';
+import { radius, spacing } from '../theme/spacing';
 
 import { BronzeRankIcon } from '../components/ranks/BronzeRankIcon';
 
@@ -13,6 +21,21 @@ export function ProfileScreen() {
   const { lifetimeQuestPoints, questsCompletedCount } = useQuestProgress();
   const { goals } = useActiveGoals();
   const goalsCompletedCount = goals.filter((g) => g.completed).length;
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+
+  const onLogOut = async () => {
+    setLogoutError(null);
+    setLoggingOut(true);
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        setLogoutError(error.message);
+      }
+    } finally {
+      setLoggingOut(false);
+    }
+  };
 
   const glowOuterOpacity = mode === 'dark' ? 0.22 : 0.12;
   const glowInnerOpacity = mode === 'dark' ? 0.35 : 0.18;
@@ -80,6 +103,33 @@ export function ProfileScreen() {
           <Text style={[styles.footerNote, { color: colors.textSecondary }]}>
             Account sync and medals will arrive with Supabase in a later step.
           </Text>
+
+          {logoutError ? (
+            <Text style={styles.logoutError} accessibilityLiveRegion="polite">
+              {logoutError}
+            </Text>
+          ) : null}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Log out"
+            onPress={() => void onLogOut()}
+            disabled={loggingOut}
+            style={({ pressed }) => [
+              styles.logoutButton,
+              {
+                borderColor: '#ef4444',
+                backgroundColor: colors.surfaceElevated,
+              },
+              (pressed || loggingOut) && { opacity: 0.85 },
+            ]}
+          >
+            {loggingOut ? (
+              <ActivityIndicator color="#ef4444" />
+            ) : (
+              <Text style={styles.logoutLabel}>Log out</Text>
+            )}
+          </Pressable>
         </View>
       </View>
     </Screen>
@@ -178,5 +228,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     textAlign: 'left',
+    marginBottom: spacing.md,
+  },
+  logoutError: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: spacing.sm,
+    color: '#ef4444',
+  },
+  logoutButton: {
+    marginTop: spacing.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    minHeight: 52,
+    justifyContent: 'center',
+  },
+  logoutLabel: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#ef4444',
   },
 });
