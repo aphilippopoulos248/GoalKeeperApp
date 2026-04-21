@@ -13,6 +13,7 @@ import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { useQuestProgress } from '../context/QuestProgressContext';
 import { supabase } from '../lib/supabase';
+import { displayNameFromUser } from '../lib/userDisplayName';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 
@@ -20,16 +21,6 @@ import { BronzeRankIcon } from '../components/ranks/BronzeRankIcon';
 import type { ProfileStackParamList } from '../navigation/profileStackTypes';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'ProfileMain'>;
-
-function displayNameFromUser(user: User): string {
-  const raw = user.user_metadata?.username;
-  const fromUsername =
-    typeof raw === 'string' && raw.trim() ? raw.trim() : '';
-  if (fromUsername) return fromUsername;
-  const local = user.email?.split('@')[0]?.trim();
-  if (local) return local;
-  return 'Player';
-}
 
 export function ProfileScreen({ navigation }: Props) {
   const { colors, mode } = useAppTheme();
