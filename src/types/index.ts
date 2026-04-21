@@ -43,6 +43,8 @@ export interface Goal {
   priority?: GoalPriority;
   /** Milestone spacing; defaults to weekly when missing (legacy goals). */
   milestoneFrequency?: MilestoneFrequency;
+  /** Full-goal achievability analysis from the add-goal wizard (optional). */
+  achievabilityCritique?: string;
   checkpoints: Checkpoint[];
   dailyQuests?: Quest[];
   completed: boolean;

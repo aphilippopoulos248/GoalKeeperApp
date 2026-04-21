@@ -47,6 +47,7 @@ export type NewGoalInput = {
 
 export type AddGoalOptions = {
   enrichment?: GoalPlannerFullResult;
+  achievabilityCritique?: string;
 };
 
 type ActiveGoalsContextValue = {
@@ -160,6 +161,10 @@ function normalizeGoal(raw: unknown): Goal | null {
     targetDateIso: typeof o.targetDateIso === 'string' ? o.targetDateIso : undefined,
     priority: parseGoalPriority(o.priority),
     milestoneFrequency: parseMilestoneFrequency(o.milestoneFrequency),
+    achievabilityCritique:
+      typeof o.achievabilityCritique === 'string' && o.achievabilityCritique.trim()
+        ? o.achievabilityCritique.trim()
+        : undefined,
     checkpoints,
     dailyQuests,
     completed: typeof o.completed === 'boolean' ? o.completed : false,
@@ -234,7 +239,7 @@ function enrichmentToCheckpoints(goalId: string, enrichment: GoalPlannerFullResu
   }));
 }
 
-function buildGoalFromInput(input: NewGoalInput, enrichment?: GoalPlannerFullResult): Goal {
+function buildGoalFromInput(input: NewGoalInput, options?: AddGoalOptions): Goal {
   const id = `g-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const targetDateIso = input.targetDate.toISOString();
   const dateLabel = input.targetDate.toLocaleDateString(undefined, {
@@ -242,6 +247,9 @@ function buildGoalFromInput(input: NewGoalInput, enrichment?: GoalPlannerFullRes
     month: 'long',
     day: 'numeric',
   });
+  const enrichment = options?.enrichment;
+  const critiqueOpt = options?.achievabilityCritique?.trim() || undefined;
+  const critiqueSpread = critiqueOpt ? { achievabilityCritique: critiqueOpt } : {};
 
   if (!enrichment) {
     return {
@@ -257,6 +265,7 @@ function buildGoalFromInput(input: NewGoalInput, enrichment?: GoalPlannerFullRes
       targetDateIso,
       priority: input.priority,
       milestoneFrequency: input.milestoneFrequency,
+      ...critiqueSpread,
       completed: false,
       checkpoints: [
         {
@@ -280,6 +289,7 @@ function buildGoalFromInput(input: NewGoalInput, enrichment?: GoalPlannerFullRes
     targetDateIso,
     priority: input.priority,
     milestoneFrequency: input.milestoneFrequency,
+    ...critiqueSpread,
     completed: false,
     checkpoints: enrichmentToCheckpoints(id, enrichment),
     dailyQuests: enrichmentToDailyQuests(id, enrichment),
@@ -449,7 +459,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
   );
 
   const addGoal = useCallback((input: NewGoalInput, options?: AddGoalOptions) => {
-    setGoals((prev) => [buildGoalFromInput(input, options?.enrichment), ...prev]);
+    setGoals((prev) => [buildGoalFromInput(input, options), ...prev]);
   }, []);
 
   const getGoalById = useCallback(

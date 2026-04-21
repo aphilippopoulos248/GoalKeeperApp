@@ -927,3 +927,111 @@ export async function regenerateDailyQuests(
   const data = await postChatJson(buildRegenSystem(dailyQuestCount), user);
   return parseDailyOnly(data, dailyQuestCount, params.reservedScheduleSlots);
 }
+
+const QUANTIFY_CLASSIFY_SYSTEM = `You decide if the user needs one more question asking for a concrete numeric target (body weight change or money). Reply with JSON only (no markdown):
+{ "needsQuantification": boolean, "kind": "weight" | "money" | null, "suggestedQuestion": string }
+
+Rules:
+- If the goal already states a clear measurable amount (e.g. "lose 10 kg", "save $5000"), needsQuantification must be false and kind null; suggestedQuestion empty string.
+- If the goal is vague about weight loss/gain without numbers, needsQuantification true, kind "weight", suggestedQuestion a short natural question (one sentence).
+- If vague about money/income/savings without numbers, needsQuantification true, kind "money", suggestedQuestion one sentence.
+- If the goal is unrelated to weight or money targets, needsQuantification false.
+- suggestedQuestion must be empty string when needsQuantification is false.`;
+
+export type QuantificationKind = 'weight' | 'money';
+
+export type ClassifyQuantificationResult = {
+  needsQuantification: boolean;
+  kind: QuantificationKind | null;
+  suggestedQuestion: string;
+};
+
+export async function classifyQuantificationNeed(params: {
+  shortTitle: string;
+  specifics: string;
+}): Promise<ClassifyQuantificationResult> {
+  const user = JSON.stringify({
+    shortTitle: params.shortTitle.trim(),
+    specifics: params.specifics.trim(),
+  });
+  const data = await postChatJson(QUANTIFY_CLASSIFY_SYSTEM, user);
+  if (!isRecord(data)) {
+    throw new GoalPlannerError('Invalid quantification JSON', 'bad_response');
+  }
+  const needs =
+    typeof data.needsQuantification === 'boolean' ? data.needsQuantification : false;
+  let kind: QuantificationKind | null = null;
+  const rawKind = data.kind;
+  if (rawKind === 'weight' || rawKind === 'money') {
+    kind = rawKind;
+  }
+  const suggested =
+    typeof data.suggestedQuestion === 'string' ? data.suggestedQuestion.trim() : '';
+  return {
+    needsQuantification: needs,
+    kind,
+    suggestedQuestion: suggested,
+  };
+}
+
+const ACHIEVABILITY_CRITIQUE_SYSTEM = `You are a concise goal coach. Reply with JSON only (no markdown):
+{ "summary": string, "risks": string[], "suggestions": string[] }
+
+Assess how realistic the goal is versus the stated deadline. Be honest but supportive. summary: 2-4 sentences. risks: 0-3 short strings. suggestions: 1-3 actionable strings.`;
+
+export type CritiqueGoalAchievabilityParams = {
+  shortTitle: string;
+  specifics: string;
+  quantificationAnswer?: string;
+  targetDateIso: string;
+  whyHelpful: string;
+  todayIso: string;
+};
+
+function flattenAchievabilityCritique(data: Record<string, unknown>): string {
+  const summary =
+    typeof data.summary === 'string' && data.summary.trim() ? data.summary.trim() : '';
+  const risksRaw = data.risks;
+  const suggestionsRaw = data.suggestions;
+  const risks =
+    Array.isArray(risksRaw) && risksRaw.length > 0
+      ? risksRaw
+          .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+          .map((x) => `• ${x.trim()}`)
+          .join('\n')
+      : '';
+  const suggestions =
+    Array.isArray(suggestionsRaw) && suggestionsRaw.length > 0
+      ? suggestionsRaw
+          .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+          .map((x) => `• ${x.trim()}`)
+          .join('\n')
+      : '';
+  const parts: string[] = [];
+  if (summary) parts.push(summary);
+  if (risks) parts.push(`Risks:\n${risks}`);
+  if (suggestions) parts.push(`Suggestions:\n${suggestions}`);
+  const out = parts.join('\n\n').trim();
+  return out || 'No critique returned.';
+}
+
+export async function critiqueGoalAchievability(
+  params: CritiqueGoalAchievabilityParams,
+): Promise<string> {
+  const user = JSON.stringify({
+    shortTitle: params.shortTitle.trim(),
+    specifics: params.specifics.trim(),
+    quantificationAnswer:
+      params.quantificationAnswer && params.quantificationAnswer.trim()
+        ? params.quantificationAnswer.trim()
+        : null,
+    targetDateIso: params.targetDateIso,
+    whyHelpful: params.whyHelpful.trim(),
+    todayIso: params.todayIso,
+  });
+  const data = await postChatJson(ACHIEVABILITY_CRITIQUE_SYSTEM, user);
+  if (!isRecord(data)) {
+    throw new GoalPlannerError('Invalid critique JSON', 'bad_response');
+  }
+  return flattenAchievabilityCritique(data);
+}

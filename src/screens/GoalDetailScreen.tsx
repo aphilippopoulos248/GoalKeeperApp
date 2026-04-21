@@ -106,6 +106,26 @@ export function GoalDetailScreen({ route, navigation }: Props) {
         <SmartRow label="Time-bound" value={g.timeBound} />
       </View>
 
+      {g.achievabilityCritique ? (
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: colors.surfaceElevated,
+              borderColor: colors.border,
+              marginBottom: spacing.md,
+            },
+          ]}
+        >
+          <Text style={[styles.cardTitle, { color: colors.text }]}>
+            Achievability review
+          </Text>
+          <Text style={[styles.body, { color: colors.textSecondary }]}>
+            {g.achievabilityCritique}
+          </Text>
+        </View>
+      ) : null}
+
       <Text style={[styles.sectionTitle, { color: colors.text }]}>
         Milestones
       </Text>
