@@ -69,7 +69,13 @@ function buildLayout(
       done: !!completed[e.quest.id],
     };
   });
-  raw.sort((a, b) => a.start - b.start || a.end - b.end);
+  raw.sort((a, b) => {
+    if (a.start !== b.start) return a.start - b.start;
+    if (a.end !== b.end) return a.end - b.end;
+    const g = a.goalId.localeCompare(b.goalId);
+    if (g !== 0) return g;
+    return a.id.localeCompare(b.id);
+  });
   const laneEnds: number[] = [];
   const withLanes = raw.map((b) => {
     let lane = laneEnds.findIndex((end) => end <= b.start);

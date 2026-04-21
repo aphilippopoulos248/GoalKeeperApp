@@ -11,8 +11,24 @@ import React, {
 import { mockDailyQuests, mockWeeklyQuests } from '../data/mockQuests';
 import { useDailyStreakAndPointsToday } from '../hooks/useDailyStreakAndPointsToday';
 import type { Quest } from '../types';
+import { resolveQuestScheduleBlock } from '../utils/dailyQuestSchedule';
 
 import { useActiveGoals } from './ActiveGoalsContext';
+
+const MINUTES_PER_DAY = 24 * 60;
+
+/** Same ordering as the day schedule (start, end, then stable ids). */
+function compareDailyEntriesByScheduleTime(a: DailyQuestEntry, b: DailyQuestEntry): number {
+  const ra = resolveQuestScheduleBlock(a.quest, 0, 1);
+  const rb = resolveQuestScheduleBlock(b.quest, 0, 1);
+  const endA = Math.min(MINUTES_PER_DAY, ra.startMinute + ra.durationMinutes);
+  const endB = Math.min(MINUTES_PER_DAY, rb.startMinute + rb.durationMinutes);
+  if (ra.startMinute !== rb.startMinute) return ra.startMinute - rb.startMinute;
+  if (endA !== endB) return endA - endB;
+  const goalCmp = a.goalId.localeCompare(b.goalId);
+  if (goalCmp !== 0) return goalCmp;
+  return a.quest.id.localeCompare(b.quest.id);
+}
 
 const QUEST_COMPLETED_KEY = '@goalkeeper/quest-completed-v1';
 
@@ -79,20 +95,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
         quest,
       })),
     );
-    entries.sort((a, b) => {
-      const ao =
-        typeof a.quest.dayOrder === 'number' && Number.isFinite(a.quest.dayOrder)
-          ? a.quest.dayOrder
-          : 500;
-      const bo =
-        typeof b.quest.dayOrder === 'number' && Number.isFinite(b.quest.dayOrder)
-          ? b.quest.dayOrder
-          : 500;
-      if (ao !== bo) return ao - bo;
-      const goalCmp = a.goalId.localeCompare(b.goalId);
-      if (goalCmp !== 0) return goalCmp;
-      return a.quest.id.localeCompare(b.quest.id);
-    });
+    entries.sort(compareDailyEntriesByScheduleTime);
     return entries;
   }, [activeGoals]);
 
