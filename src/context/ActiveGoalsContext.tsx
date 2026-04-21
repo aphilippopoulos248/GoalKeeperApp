@@ -66,6 +66,16 @@ function normalizeQuest(raw: unknown): Quest | null {
     typeof dayOrderRaw === 'number' && Number.isFinite(dayOrderRaw)
       ? Math.min(999, Math.max(0, Math.round(dayOrderRaw)))
       : undefined;
+  const scheduleStartRaw = o.scheduleStartMinute;
+  const scheduleStartMinute =
+    typeof scheduleStartRaw === 'number' && Number.isFinite(scheduleStartRaw)
+      ? Math.min(1439, Math.max(0, Math.round(scheduleStartRaw)))
+      : undefined;
+  const scheduleDurRaw = o.scheduleDurationMinutes;
+  const scheduleDurationMinutes =
+    typeof scheduleDurRaw === 'number' && Number.isFinite(scheduleDurRaw)
+      ? Math.min(120, Math.max(15, Math.round(scheduleDurRaw)))
+      : undefined;
   return {
     id: o.id,
     title: o.title,
@@ -73,6 +83,8 @@ function normalizeQuest(raw: unknown): Quest | null {
     points,
     kind,
     ...(dayOrder !== undefined ? { dayOrder } : {}),
+    ...(scheduleStartMinute !== undefined ? { scheduleStartMinute } : {}),
+    ...(scheduleDurationMinutes !== undefined ? { scheduleDurationMinutes } : {}),
   };
 }
 
@@ -164,6 +176,8 @@ function enrichmentToDailyQuests(goalId: string, enrichment: GoalPlannerFullResu
     description: q.description,
     points: q.points,
     dayOrder: q.dayOrder,
+    scheduleStartMinute: q.startMinute,
+    scheduleDurationMinutes: q.durationMinutes,
   }));
 }
 
@@ -295,6 +309,8 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
                   description: q.description,
                   points: q.points,
                   dayOrder: q.dayOrder,
+                  scheduleStartMinute: q.startMinute,
+                  scheduleDurationMinutes: q.durationMinutes,
                 })),
               };
             }),
@@ -375,6 +391,8 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
                         description: q.description,
                         points: q.points,
                         dayOrder: q.dayOrder,
+                        scheduleStartMinute: q.startMinute,
+                        scheduleDurationMinutes: q.durationMinutes,
                       })),
                     };
                   }),

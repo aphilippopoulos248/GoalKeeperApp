@@ -8,6 +8,16 @@ export type PlannerDailyQuest = {
   points: number;
   /** 0 = start of day, 999 = late evening / before bed; compared across all goals on the menu. */
   dayOrder: number;
+  /** Minutes from midnight (0–1439). Non-overlapping within this goal’s daily batch when possible. */
+  startMinute: number;
+  /** Block length in minutes (15–120). */
+  durationMinutes: number;
+};
+
+/** Pre-finalize row while parsing / normalizing dayOrder (schedule filled in `finalizePlannerDailyQuests`). */
+type DailyQuestParseRow = Omit<PlannerDailyQuest, 'startMinute' | 'durationMinutes'> & {
+  startMinute?: number;
+  durationMinutes?: number;
 };
 
 export type GoalPlannerFullResult = {
@@ -88,6 +98,68 @@ function clampDayOrder(n: number): number {
   return Math.min(999, Math.max(0, Math.round(n)));
 }
 
+const WAKE_START_MINUTE = 6 * 60;
+const WAKE_END_MINUTE = 22 * 60;
+const DEFAULT_BLOCK_MINUTES = 45;
+
+function clampStartMinute(n: number): number {
+  if (!Number.isFinite(n)) return WAKE_START_MINUTE;
+  return Math.min(1439, Math.max(0, Math.round(n)));
+}
+
+function clampDurationMinutes(n: number | undefined): number {
+  if (n === undefined || !Number.isFinite(n)) return DEFAULT_BLOCK_MINUTES;
+  return Math.min(120, Math.max(15, Math.round(n)));
+}
+
+function deriveStartMinuteFromDayOrder(dayOrder: number, durationMinutes: number): number {
+  const d = clampDurationMinutes(durationMinutes);
+  const span = Math.max(1, WAKE_END_MINUTE - WAKE_START_MINUTE - d);
+  const t = WAKE_START_MINUTE + Math.round((clampDayOrder(dayOrder) / 999) * span);
+  return clampStartMinute(Math.min(t, WAKE_END_MINUTE - d));
+}
+
+/**
+ * Ensures each quest has start/duration, resolves overlaps within this batch by nudging later blocks forward.
+ */
+function finalizePlannerDailyQuests(rows: DailyQuestParseRow[]): PlannerDailyQuest[] {
+  if (rows.length === 0) return [];
+  const drafted = rows.map((r) => {
+    const durationMinutes = clampDurationMinutes(r.durationMinutes);
+    const hasStart =
+      typeof r.startMinute === 'number' && Number.isFinite(r.startMinute);
+    const startMinute = hasStart
+      ? clampStartMinute(r.startMinute as number)
+      : deriveStartMinuteFromDayOrder(r.dayOrder, durationMinutes);
+    return {
+      title: r.title,
+      description: r.description,
+      points: r.points,
+      dayOrder: r.dayOrder,
+      startMinute,
+      durationMinutes,
+    };
+  });
+  drafted.sort((a, b) => a.startMinute - b.startMinute);
+  let cursor = WAKE_START_MINUTE;
+  const out: PlannerDailyQuest[] = [];
+  for (const q of drafted) {
+    let startMinute = Math.max(q.startMinute, cursor, WAKE_START_MINUTE);
+    let durationMinutes = q.durationMinutes;
+    const maxDur = 1440 - startMinute;
+    if (durationMinutes > maxDur) {
+      durationMinutes = Math.max(15, maxDur);
+    }
+    if (durationMinutes < 15) {
+      startMinute = Math.max(WAKE_START_MINUTE, 1440 - 15);
+      durationMinutes = 15;
+    }
+    cursor = startMinute + durationMinutes;
+    out.push({ ...q, startMinute, durationMinutes });
+  }
+  return out;
+}
+
 /** Lower = earlier in day; 4 = unknown (sort by model dayOrder among unknowns). */
 type TimeOfDayRank = 0 | 1 | 2 | 3 | 4;
 
@@ -144,7 +216,7 @@ const DAY_ORDER_BAND: Record<Exclude<TimeOfDayRank, 4>, { lo: number; hi: number
 };
 
 /** Re-sort each AI batch by time-of-day cues, then assign dayOrder inside prompt bands (cross-goal safe). */
-function normalizeDailyQuestDayOrders(quests: PlannerDailyQuest[]): PlannerDailyQuest[] {
+function normalizeDailyQuestDayOrders(quests: DailyQuestParseRow[]): DailyQuestParseRow[] {
   if (quests.length === 0) return [];
   const scored = quests.map((q, originalIndex) => ({
     q,
@@ -217,9 +289,11 @@ Rules:
 - Checkpoints must align with the goal, deadline, and milestoneFrequency from the user message.
 - dailyQuests must be specific to this goal’s title and description (not generic self-help).
 - Each dailyQuest MUST include dayOrder: integer 0–999. The app sorts ALL goals’ quests by dayOrder ascending (lower = earlier on the Menu, higher = later).
+- Each dailyQuest MUST include startMinute: integer 0–1439 (minutes from midnight) and durationMinutes: integer 15–120 for a single-day schedule block. Space blocks within roughly 06:00–22:00, ordered consistently with dayOrder (earlier dayOrder → earlier startMinute). No overlapping time ranges within this goal’s dailyQuests array (each block’s [startMinute, startMinute+durationMinutes) must be disjoint).
+- startMinute MUST match the real-world time of day implied by that quest’s title and description: morning / wake / breakfast / early work → about 05:00–11:30 (startMinute roughly 300–690); lunch / midday → about 11:00–14:30 (660–870); afternoon / after school / after work → about 12:00–18:00 (720–1080); evening / wind-down / before bed / night prep → about 17:00–22:30 (1020–1350). Never schedule a clearly morning-themed quest in late evening or a bedtime task in the morning.
 - dayOrder bands (follow strictly): morning / wake / breakfast → 0–199; lunch / midday / noon → 200–449; afternoon → 450–649; evening / night / before bed / wind-down → 750–999. Spread multiple quests across the right band; do not reuse the same integer for every quest.
-- Hard rule: if title or description clearly means morning or right after waking, dayOrder MUST be ≤199. If it clearly means evening or before bed, dayOrder MUST be ≥750.
-- Example for 3 quests: a morning habit ≈120, a lunch-related task ≈350, an evening wind-down ≈900.
+- Hard rule: if title or description clearly means morning or right after waking, dayOrder MUST be ≤199 and startMinute MUST fall in the morning window above. If it clearly means evening or before bed, dayOrder MUST be ≥750 and startMinute MUST fall in the evening window above.
+- Example for 3 quests: a morning habit ≈120, a lunch-related task ≈350, an evening wind-down ≈900; example schedule: startMinute 480 durationMinutes 30, 780/45, 1260/40.
 - Still a concrete action—never “go to sleep” as a quest.
 - You MUST return exactly ${n} items in dailyQuests (no fewer, no more).`;
 }
@@ -227,7 +301,7 @@ Rules:
 function buildRegenSystem(dailyQuestCount: number): string {
   const n = clampQuestCount(dailyQuestCount);
   return `You are a goal-planning coach. Reply with a single JSON object only: { "dailyQuests": [ ... ] }.
-dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder" } with points 10–25 and dayOrder an integer 0–999.
+dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder", "startMinute", "durationMinutes" } with points 10–25, dayOrder 0–999, startMinute 0–1439, durationMinutes 15–120. Blocks must not overlap within the array; prefer 06:00–22:00.
 
 Rules:
 - The user message includes milestoneFrequency (weekly / biweekly / monthly). Align daily quest pacing and tone with that milestone cadence (e.g. smaller steps for weekly checkpoints vs monthly).
@@ -236,7 +310,9 @@ Rules:
 - Higher completedCheckpointCount means noticeably harder (longer or more demanding) daily actions, still realistic.
 - Each quest must be specific to this goal’s title and description (not generic advice).
 - Each quest MUST include dayOrder 0–999; the Menu sorts all goals’ quests ascending (morning first, evening last).
-- Bands: morning/wake/breakfast → 0–199; lunch/midday/noon → 200–449; afternoon → 450–649; evening/night/before bed/wind-down → 750–999. Morning cues → dayOrder ≤199; evening/bedtime cues → dayOrder ≥750. Example triple: ≈120, ≈350, ≈900.
+- Each quest MUST include startMinute and durationMinutes (non-overlapping within the batch; align start times with dayOrder).
+- startMinute MUST fit the quest’s meaning: morning/wake/breakfast quests ≈ 05:00–11:30; lunch/midday ≈ 11:00–14:30; afternoon ≈ 12:00–18:00; evening/wind-down/bedtime prep ≈ 17:00–22:30. Do not put morning-themed actions at night or evening-only habits in the morning.
+- Bands: morning/wake/breakfast → 0–199; lunch/midday/noon → 200–449; afternoon → 450–649; evening/night/before bed/wind-down → 750–999. Morning cues → dayOrder ≤199 and morning startMinute window; evening/bedtime cues → dayOrder ≥750 and evening startMinute window. Example triple: ≈120, ≈350, ≈900.
 - Return exactly ${n} quests (no fewer, no more).`;
 }
 
@@ -369,6 +445,29 @@ function pickQuestField(
 }
 
 /** If only one of title/description exists, derive the other so we still accept the row. */
+function pickOptionalStartMinute(record: Record<string, unknown>): number | undefined {
+  const keys = ['startMinute', 'start_minute', 'startMins', 'start'] as const;
+  for (const k of keys) {
+    const v = record[k];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+  }
+  return undefined;
+}
+
+function pickOptionalDurationMinutes(record: Record<string, unknown>): number | undefined {
+  const keys = [
+    'durationMinutes',
+    'duration_minutes',
+    'duration',
+    'lengthMinutes',
+  ] as const;
+  for (const k of keys) {
+    const v = record[k];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+  }
+  return undefined;
+}
+
 function pairTitleDescription(
   title: string | undefined,
   description: string | undefined,
@@ -438,7 +537,7 @@ function parseFullResult(
     throw new GoalPlannerError('Invalid dailyQuests', 'bad_response');
   }
 
-  const dailyQuests: GoalPlannerFullResult['dailyQuests'] = [];
+  const dailyQuests: DailyQuestParseRow[] = [];
   let dqIndex = 0;
   for (const q of data.dailyQuests) {
     if (!isRecord(q)) {
@@ -461,12 +560,17 @@ function parseFullResult(
       typeof orderRaw === 'number' && Number.isFinite(orderRaw)
         ? clampDayOrder(orderRaw)
         : defaultOrder;
-    dailyQuests.push({
+    const row: DailyQuestParseRow = {
       title,
       description,
       points: pts,
       dayOrder,
-    });
+    };
+    const sm = pickOptionalStartMinute(q);
+    const dm = pickOptionalDurationMinutes(q);
+    if (sm !== undefined) row.startMinute = clampStartMinute(sm);
+    if (dm !== undefined) row.durationMinutes = clampDurationMinutes(dm);
+    dailyQuests.push(row);
     dqIndex += 1;
   }
 
@@ -477,7 +581,9 @@ function parseFullResult(
     );
   }
 
-  const normalizedDaily = normalizeDailyQuestDayOrders(dailyQuests.slice(0, n));
+  const normalizedDaily = finalizePlannerDailyQuests(
+    normalizeDailyQuestDayOrders(dailyQuests.slice(0, n)),
+  );
 
   return {
     specific: (data.specific as string).trim(),
@@ -498,7 +604,7 @@ function parseDailyOnly(
   if (!isRecord(data) || !Array.isArray(data.dailyQuests)) {
     throw new GoalPlannerError('Invalid dailyQuests-only response', 'bad_response');
   }
-  const out: GoalPlannerFullResult['dailyQuests'] = [];
+  const out: DailyQuestParseRow[] = [];
   let dqIndex = 0;
   for (const q of data.dailyQuests) {
     if (!isRecord(q)) continue;
@@ -516,12 +622,17 @@ function parseDailyOnly(
       typeof orderRaw === 'number' && Number.isFinite(orderRaw)
         ? clampDayOrder(orderRaw)
         : defaultOrder;
-    out.push({
+    const row: DailyQuestParseRow = {
       title,
       description,
       points: pts,
       dayOrder,
-    });
+    };
+    const sm = pickOptionalStartMinute(q);
+    const dm = pickOptionalDurationMinutes(q);
+    if (sm !== undefined) row.startMinute = clampStartMinute(sm);
+    if (dm !== undefined) row.durationMinutes = clampDurationMinutes(dm);
+    out.push(row);
     dqIndex += 1;
   }
   if (out.length < n) {
@@ -530,7 +641,7 @@ function parseDailyOnly(
       'bad_response',
     );
   }
-  return normalizeDailyQuestDayOrders(out.slice(0, n));
+  return finalizePlannerDailyQuests(normalizeDailyQuestDayOrders(out.slice(0, n)));
 }
 
 export async function planNewGoal(

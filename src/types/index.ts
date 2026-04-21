@@ -16,6 +16,10 @@ export interface Quest {
    * Set by AI (0–999) so the menu can sort dailies across all goals.
    */
   dayOrder?: number;
+  /** Minutes from midnight (0–1439). Set by AI when planning; optional on legacy quests. */
+  scheduleStartMinute?: number;
+  /** Block length in minutes (e.g. 15–120). Defaults in UI when missing. */
+  scheduleDurationMinutes?: number;
 }
 
 export interface Checkpoint {
