@@ -520,13 +520,20 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       const oldGoal = prev.find((g) => g.id === goalId);
       if (!oldGoal) return prev;
 
-      const cp = oldGoal.checkpoints.find((c) => c.id === checkpointId);
-      if (!cp) return prev;
+      const idx = oldGoal.checkpoints.findIndex((c) => c.id === checkpointId);
+      if (idx === -1) return prev;
+
+      const cp = oldGoal.checkpoints[idx];
+      const willComplete = !cp.done;
+
+      const nextCheckpoints = oldGoal.checkpoints.map((c, i) => {
+        if (willComplete) {
+          return i <= idx ? { ...c, done: true } : c;
+        }
+        return i >= idx ? { ...c, done: false } : c;
+      });
 
       const prevDoneCount = oldGoal.checkpoints.filter((c) => c.done).length;
-      const nextCheckpoints = oldGoal.checkpoints.map((c) =>
-        c.id === checkpointId ? { ...c, done: !c.done } : c,
-      );
       const nextDoneCount = nextCheckpoints.filter((c) => c.done).length;
 
       const nextGoals = prev.map((g) =>
