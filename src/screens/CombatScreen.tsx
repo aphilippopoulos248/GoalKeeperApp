@@ -1,3 +1,6 @@
+/**
+ * Placeholder combat / boss flow. Not mounted in RootTabs; kept for future use.
+ */
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Screen } from '../components/Screen';

@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 import { GoalsStack } from './GoalsStack';
-import { CombatScreen } from '../screens/CombatScreen';
+import { DayScheduleScreen } from '../screens/DayScheduleScreen';
 import { FriendsScreen } from '../screens/FriendsScreen';
 import { MenuScreen } from '../screens/MenuScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -11,7 +11,7 @@ import { useAppTheme } from '../theme/ThemeProvider';
 
 export type RootTabParamList = {
   Menu: undefined;
-  Combat: undefined;
+  DaySchedule: undefined;
   ActiveGoals: undefined;
   Friends: undefined;
   Profile: undefined;
@@ -46,11 +46,12 @@ export function RootTabs() {
         }}
       />
       <Tab.Screen
-        name="Combat"
-        component={CombatScreen}
+        name="DaySchedule"
+        component={DayScheduleScreen}
         options={{
+          title: 'Schedule',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="flash-outline" size={size} color={color} />
+            <Ionicons name="calendar-outline" size={size} color={color} />
           ),
         }}
       />

@@ -1,9 +1,7 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, StyleSheet, Switch, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
-import { DailyQuestDaySchedule } from '../components/DailyQuestDaySchedule';
 import { DailyQuestProgressCard } from '../components/DailyQuestProgressCard';
 import { QuestRow } from '../components/QuestRow';
 import { QuestSection } from '../components/QuestSection';
@@ -20,8 +18,6 @@ import {
   dailyQuestCountForPriority,
   parseGoalPriority,
 } from '../utils/goalPriority';
-
-const MENU_DAY_SCHEDULE_KEY = '@goalkeeper/menu-day-schedule-v1';
 
 type DailyQuestSortMode = 'recommended' | 'goal' | 'priority';
 
@@ -45,10 +41,9 @@ function prioritySortRank(p: GoalPriority): number {
 }
 
 export function MenuScreen() {
-  const { colors, mode } = useAppTheme();
-  const { goals, updateDailyQuestSchedule } = useActiveGoals();
+  const { colors } = useAppTheme();
+  const { goals } = useActiveGoals();
   const [sortMode, setSortMode] = useState<DailyQuestSortMode>('recommended');
-  const [daySchedule, setDaySchedule] = useState(false);
   const {
     completed,
     toggleQuest,
@@ -121,26 +116,6 @@ export function MenuScreen() {
 
   const showDailyLoading = awaitingAiQuests && dailyQuestEntries.length === 0;
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(MENU_DAY_SCHEDULE_KEY);
-        if (!cancelled && raw === '1') setDaySchedule(true);
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const onDayScheduleChange = useCallback((value: boolean) => {
-    setDaySchedule(value);
-    void AsyncStorage.setItem(MENU_DAY_SCHEDULE_KEY, value ? '1' : '0');
-  }, []);
-
   return (
     <Screen>
       <DailyQuestProgressCard
@@ -156,117 +131,87 @@ export function MenuScreen() {
           <Text style={[styles.sectionHeading, { color: colors.text }]}>
             Daily quests
           </Text>
-          {!daySchedule ? (
-            <View
-              style={[
-                styles.sortPickerWrap,
-                {
-                  backgroundColor: colors.surfaceElevated,
-                  borderColor: colors.border,
-                },
-              ]}
+          <View
+            style={[
+              styles.sortPickerWrap,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Picker
+              accessibilityLabel="Sort daily quests"
+              selectedValue={sortMode}
+              onValueChange={(v) => setSortMode(v as DailyQuestSortMode)}
+              style={[styles.sortPicker, { color: colors.text }]}
+              mode={Platform.OS === 'android' ? 'dropdown' : undefined}
+              dropdownIconColor={colors.textSecondary}
             >
-              <Picker
-                accessibilityLabel="Sort daily quests"
-                selectedValue={sortMode}
-                onValueChange={(v) => setSortMode(v as DailyQuestSortMode)}
-                style={[styles.sortPicker, { color: colors.text }]}
-                mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-                dropdownIconColor={colors.textSecondary}
-              >
-                <Picker.Item
-                  label="Recommended"
-                  value="recommended"
-                  color={colors.text}
-                />
-                <Picker.Item label="Goal" value="goal" color={colors.text} />
-                <Picker.Item
-                  label="Priority"
-                  value="priority"
-                  color={colors.text}
-                />
-              </Picker>
-            </View>
-          ) : (
-            <View style={styles.headerSpacer} />
-          )}
-        </View>
-        <View style={styles.scheduleToggleRow}>
-          <Text style={[styles.scheduleToggleLabel, { color: colors.text }]}>
-            Day schedule
-          </Text>
-          <Switch
-            accessibilityLabel="Show daily quests as day schedule"
-            value={daySchedule}
-            onValueChange={onDayScheduleChange}
-            trackColor={{
-              false: colors.border,
-              true: colors.primaryMuted,
-            }}
-            thumbColor={daySchedule ? colors.primary : colors.textSecondary}
-          />
+              <Picker.Item
+                label="Recommended"
+                value="recommended"
+                color={colors.text}
+              />
+              <Picker.Item label="Goal" value="goal" color={colors.text} />
+              <Picker.Item
+                label="Priority"
+                value="priority"
+                color={colors.text}
+              />
+            </Picker>
+          </View>
         </View>
         {showDailyLoading ? (
           <Text style={[styles.loadingHint, { color: colors.textSecondary }]}>
             Generating quests…
           </Text>
         ) : null}
-        {daySchedule ? (
-          <DailyQuestDaySchedule
-            entries={displayedDailyQuestEntries}
-            completed={completed}
-            colors={colors}
-            mode={mode}
-            snapMinutes={15}
-            onCommitSchedule={updateDailyQuestSchedule}
-          />
-        ) : (
-          displayedDailyQuestEntries.map((entry) => (
+        {displayedDailyQuestEntries.map((entry) => (
+          <View
+            key={entry.quest.id}
+            style={[
+              styles.questCard,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.border,
+                ...Platform.select({
+                  ios: {
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 1 },
+                    shadowOpacity: 0.06,
+                    shadowRadius: 3,
+                  },
+                  android: { elevation: 2 },
+                  default: {},
+                }),
+              },
+            ]}
+          >
             <View
-              key={entry.quest.id}
               style={[
-                styles.questCard,
+                styles.questCardHeader,
                 {
-                  backgroundColor: colors.surfaceElevated,
-                  borderColor: colors.border,
-                  ...Platform.select({
-                    ios: {
-                      shadowColor: '#000',
-                      shadowOffset: { width: 0, height: 1 },
-                      shadowOpacity: 0.06,
-                      shadowRadius: 3,
-                    },
-                    android: { elevation: 2 },
-                    default: {},
-                  }),
+                  backgroundColor: colors.surface,
+                  borderBottomColor: colors.border,
                 },
               ]}
             >
-              <View
-                style={[
-                  styles.questCardHeader,
-                  {
-                    backgroundColor: colors.surface,
-                    borderBottomColor: colors.border,
-                  },
-                ]}
+              <Text
+                style={[styles.questCardHeaderText, { color: colors.textSecondary }]}
+                numberOfLines={1}
               >
-                <Text
-                  style={[styles.questCardHeaderText, { color: colors.textSecondary }]}
-                  numberOfLines={1}
-                >
-                  {entry.goalTitle}
-                </Text>
-              </View>
-              <QuestRow
-                variant="inCard"
-                quest={entry.quest}
-                completed={!!completed[entry.quest.id]}
-                onToggle={() => toggleQuest(entry.quest.id)}
-              />
+                {entry.goalTitle}
+              </Text>
             </View>
-          ))
-        )}
+            <QuestRow
+              variant="inCard"
+              quest={entry.quest}
+              completed={!!completed[entry.quest.id]}
+              onToggle={() => toggleQuest(entry.quest.id)}
+            />
+          </View>
+        ))}
       </View>
 
       <QuestSection
@@ -288,21 +233,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     marginBottom: spacing.sm,
-  },
-  headerSpacer: {
-    flex: 1,
-    minWidth: 148,
-  },
-  scheduleToggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
-    paddingVertical: spacing.xs,
-  },
-  scheduleToggleLabel: {
-    fontSize: 15,
-    fontWeight: '600',
   },
   sectionHeading: {
     flex: 1,
