@@ -205,31 +205,36 @@ function ScheduleQuestBlock({
       <View
         style={[styles.blockTextWrap, compact && styles.blockTextWrapCompact]}
       >
+        <View style={styles.blockTitleCell}>
+          <Text
+            style={[
+              styles.blockTitle,
+              compact && styles.blockTitleCompact,
+              {
+                color: colors.text,
+                textDecorationLine: block.done ? 'line-through' : 'none',
+              },
+            ]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            {...Platform.select({
+              android: { includeFontPadding: false },
+              default: {},
+            })}
+          >
+            {block.title}
+          </Text>
+        </View>
         <Text
           style={[
-            styles.blockTitle,
-            compact && styles.blockTitleCompact,
-            {
-              color: colors.text,
-              textDecorationLine: block.done ? 'line-through' : 'none',
-            },
+            styles.blockTimeRight,
+            compact && styles.blockTimeRightCompact,
+            { color: colors.textSecondary },
           ]}
-          numberOfLines={compact ? 1 : 2}
-          {...Platform.select({
-            android: { includeFontPadding: compact ? false : true },
-            default: {},
-          })}
+          numberOfLines={1}
         >
-          {block.title}
+          {range}
         </Text>
-        {!compact ? (
-          <Text
-            style={[styles.blockTime, { color: colors.textSecondary }]}
-            numberOfLines={1}
-          >
-            {range}
-          </Text>
-        ) : null}
       </View>
     </View>
   );
@@ -478,15 +483,19 @@ const styles = StyleSheet.create({
   },
   blockTextWrap: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 0,
     paddingVertical: 4,
     paddingHorizontal: 8,
-    justifyContent: 'flex-start',
-    minWidth: 0,
   },
   blockTextWrapCompact: {
-    paddingVertical: 0,
+    paddingVertical: 2,
     paddingHorizontal: 4,
-    justifyContent: 'center',
+  },
+  blockTitleCell: {
+    flex: 1,
+    minWidth: 0,
   },
   blockTitle: {
     fontSize: 13,
@@ -497,9 +506,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 12,
   },
-  blockTime: {
+  blockTimeRight: {
+    flexShrink: 0,
+    marginLeft: 12,
     fontSize: 11,
     fontWeight: '500',
-    marginTop: 2,
+  },
+  blockTimeRightCompact: {
+    marginLeft: 8,
+    fontSize: 9,
+    fontWeight: '500',
   },
 });
