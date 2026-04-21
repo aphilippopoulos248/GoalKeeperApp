@@ -8,7 +8,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ActiveGoalsProvider } from './src/context/ActiveGoalsContext';
 import { QuestProgressProvider } from './src/context/QuestProgressContext';
-import { RootTabs } from './src/navigation/RootTabs';
+import { RootStack } from './src/navigation/RootStack';
 import { ThemeProvider, useAppTheme } from './src/theme/ThemeProvider';
 
 function AppNavigation() {
@@ -29,7 +29,7 @@ function AppNavigation() {
 
   return (
     <NavigationContainer theme={navTheme}>
-      <RootTabs />
+      <RootStack />
     </NavigationContainer>
   );
 }
