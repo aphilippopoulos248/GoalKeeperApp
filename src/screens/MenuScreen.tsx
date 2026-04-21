@@ -7,7 +7,6 @@ import { FlatList, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { DailyQuestProgressCard } from '../components/DailyQuestProgressCard';
 import { QuestRow } from '../components/QuestRow';
-import { QuestSection } from '../components/QuestSection';
 import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import {
@@ -57,7 +56,6 @@ export function MenuScreen() {
     streak,
     pointsToday,
     dailyQuestEntries,
-    weeklyQuests,
   } = useQuestProgress();
 
   const activeGoals = useMemo(
@@ -281,18 +279,6 @@ export function MenuScreen() {
     ],
   );
 
-  const listFooter = useMemo(
-    () => (
-      <QuestSection
-        title="Weekly quests"
-        quests={weeklyQuests}
-        completed={completed}
-        onToggle={toggleQuest}
-      />
-    ),
-    [completed, toggleQuest, weeklyQuests],
-  );
-
   return (
     <Screen scroll={false}>
       <FlatList
@@ -302,7 +288,6 @@ export function MenuScreen() {
         keyExtractor={(e) => e.quest.id}
         renderItem={renderQuestItem}
         ListHeaderComponent={listHeader}
-        ListFooterComponent={listFooter}
         keyboardShouldPersistTaps="handled"
         onScrollToIndexFailed={(info) => {
           setTimeout(() => {
