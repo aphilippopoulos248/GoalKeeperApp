@@ -1,3 +1,4 @@
+import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Platform, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
@@ -19,8 +20,17 @@ const PIXELS_PER_MINUTE = 1.44;
 const SCHEDULE_TIMELINE_MAX_HEIGHT = 400;
 const GUTTER_WIDTH = 54;
 const HOUR_COUNT = 24;
-/** Show this time at the top of the scroll viewport initially (6:00 AM). */
-const DEFAULT_SCROLL_START_MINUTE = 6 * 60;
+/** “Now” line color (Google Calendar–style). */
+const NOW_LINE_COLOR = '#ea4335';
+/** Re-scroll interval so the time line and auto-scroll use an up-to-date clock. */
+const NOW_SUBSCRIBE_MS = 30_000;
+
+function getNowFractionalMinute(): number {
+  const d = new Date();
+  return (
+    d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60 + d.getMilliseconds() / 60_000
+  );
+}
 
 type ScheduleBlock = {
   id: string;
@@ -331,11 +341,22 @@ export function DailyQuestDaySchedule({
   const scrollRef = useRef<ScrollView>(null);
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-
-  const defaultScrollY = useMemo(
-    () => DEFAULT_SCROLL_START_MINUTE * PIXELS_PER_MINUTE,
-    [],
+  const [nowFractionalMinute, setNowFractionalMinute] = useState(
+    () => getNowFractionalMinute(),
   );
+  const nowFractionalRef = useRef(getNowFractionalMinute());
+
+  const tickNow = useCallback(() => {
+    const t = getNowFractionalMinute();
+    setNowFractionalMinute(t);
+    nowFractionalRef.current = t;
+  }, []);
+
+  useEffect(() => {
+    tickNow();
+    const id = setInterval(tickNow, NOW_SUBSCRIBE_MS);
+    return () => clearInterval(id);
+  }, [tickNow]);
 
   const { blocks, dayLabel } = useMemo(() => {
     const dayLabelStr = new Date().toLocaleDateString(undefined, {
@@ -346,34 +367,35 @@ export function DailyQuestDaySchedule({
     return { blocks: buildLayout(entries, completed), dayLabel: dayLabelStr };
   }, [entries, completed]);
 
-  const scrollToDefaultMorning = useCallback(() => {
-    scrollRef.current?.scrollTo({
-      y: Math.max(0, defaultScrollY),
-      animated: false,
-    });
-  }, [defaultScrollY]);
+  const maxScrollY = useMemo(
+    () => Math.max(0, dayHeight + spacing.md - SCHEDULE_TIMELINE_MAX_HEIGHT),
+    [dayHeight],
+  );
 
-  /** Only auto-scroll to 6:00 once when the timeline first gets content; not on every entries/completed update (e.g. drag-drop). */
-  const initialScrollDoneRef = useRef(false);
+  const scrollToCurrentTime = useCallback(
+    (animated: boolean) => {
+      const t = nowFractionalRef.current;
+      const nowPixel = t * PIXELS_PER_MINUTE;
+      const y = Math.max(
+        0,
+        Math.min(maxScrollY, nowPixel - SCHEDULE_TIMELINE_MAX_HEIGHT * 0.35),
+      );
+      scrollRef.current?.scrollTo({ y, animated });
+    },
+    [maxScrollY],
+  );
 
-  const tryInitialScrollToMorning = useCallback(() => {
-    if (initialScrollDoneRef.current || blocks.length === 0) return;
-    scrollToDefaultMorning();
-    initialScrollDoneRef.current = true;
-  }, [blocks.length, scrollToDefaultMorning]);
-
-  useEffect(() => {
-    if (blocks.length === 0) {
-      initialScrollDoneRef.current = false;
-    }
-  }, [blocks.length]);
-
-  useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      requestAnimationFrame(tryInitialScrollToMorning);
-    });
-    return () => cancelAnimationFrame(id);
-  }, [blocks.length, tryInitialScrollToMorning]);
+  useFocusEffect(
+    useCallback(() => {
+      tickNow();
+      const id0 = requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          scrollToCurrentTime(true);
+        });
+      });
+      return () => cancelAnimationFrame(id0);
+    }, [scrollToCurrentTime, tickNow]),
+  );
 
   const onDragStart = useCallback((id: string) => {
     setDraggingId(id);
@@ -408,7 +430,6 @@ export function DailyQuestDaySchedule({
         nestedScrollEnabled
         keyboardShouldPersistTaps="handled"
         scrollEnabled={scrollEnabled}
-        onContentSizeChange={tryInitialScrollToMorning}
       >
         <View style={styles.row}>
           <View style={[styles.gutter, { width: GUTTER_WIDTH }]}>
@@ -426,6 +447,16 @@ export function DailyQuestDaySchedule({
                 {formatMinuteLabel(h * 60)}
               </Text>
             ))}
+            <View
+              style={[
+                styles.nowGutterMark,
+                { top: nowFractionalMinute * PIXELS_PER_MINUTE - 4 },
+              ]}
+              pointerEvents="none"
+              accessibilityLabel="Current time"
+            >
+              <View style={styles.nowGutterDot} />
+            </View>
           </View>
           <View
             style={[
@@ -448,6 +479,15 @@ export function DailyQuestDaySchedule({
                 ]}
               />
             ))}
+            <View
+              style={[
+                styles.nowLineBar,
+                {
+                  top: nowFractionalMinute * PIXELS_PER_MINUTE - 1,
+                },
+              ]}
+              pointerEvents="none"
+            />
             {blocks.map((b) => (
               <ScheduleQuestBlock
                 key={b.id}
@@ -515,6 +555,33 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  nowGutterMark: {
+    position: 'absolute',
+    right: 2,
+    width: 10,
+    height: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 8,
+  },
+  nowGutterDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: NOW_LINE_COLOR,
+  },
+  nowLineBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: NOW_LINE_COLOR,
+    zIndex: 30,
+    ...Platform.select({
+      android: { elevation: 1 },
+      default: {},
+    }),
   },
   block: {
     position: 'absolute',
