@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Platform, StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
 
 import type { DailyQuestEntry } from '../context/QuestProgressContext';
 import type { ThemeColors, ThemeMode } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import {
-  formatScheduleRange,
+  clampScheduleStartMinute,
   formatMinuteLabel,
+  formatScheduleRange,
   resolveQuestScheduleBlock,
 } from '../utils/dailyQuestSchedule';
 
@@ -26,6 +28,7 @@ type ScheduleBlock = {
   title: string;
   start: number;
   end: number;
+  durationMinutes: number;
   lane: number;
   laneCount: number;
   done: boolean;
@@ -62,33 +65,10 @@ function buildLayout(
       title: rawTitle.length > 0 ? rawTitle : 'Daily quest',
       start: startMinute,
       end,
+      durationMinutes,
       done: !!completed[e.quest.id],
     };
   });
-  // #region agent log
-  fetch('http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': '1b4fdd',
-    },
-    body: JSON.stringify({
-      sessionId: '1b4fdd',
-      location: 'DailyQuestDaySchedule.tsx:buildLayout',
-      message: 'schedule block intervals',
-      data: {
-        blocks: raw.map((r) => ({
-          title: r.title.slice(0, 48),
-          start: r.start,
-          end: r.end,
-          spanMin: r.end - r.start,
-        })),
-      },
-      timestamp: Date.now(),
-      hypothesisId: 'H2',
-    }),
-  }).catch(() => {});
-  // #endregion
   raw.sort((a, b) => a.start - b.start || a.end - b.end);
   const laneEnds: number[] = [];
   const withLanes = raw.map((b) => {
@@ -108,11 +88,180 @@ function buildLayout(
   });
 }
 
+export type CommitScheduleFn = (
+  goalId: string,
+  questId: string,
+  scheduleStartMinute: number,
+  scheduleDurationMinutes: number,
+) => void;
+
+type ScheduleQuestBlockProps = {
+  block: ScheduleBlock;
+  isDark: boolean;
+  colors: ThemeColors;
+  snapMinutes: number;
+  draggingId: string | null;
+  onDragStart: (id: string) => void;
+  onDragEnd: () => void;
+  onCommitSchedule?: CommitScheduleFn;
+};
+
+function ScheduleQuestBlock({
+  block,
+  isDark,
+  colors,
+  snapMinutes,
+  draggingId,
+  onDragStart,
+  onDragEnd,
+  onCommitSchedule,
+}: ScheduleQuestBlockProps) {
+  const translateY = useRef(new Animated.Value(0)).current;
+  const canDrag = !!onCommitSchedule && block.goalId.length > 0;
+
+  const gesture = useMemo(() => {
+    if (!canDrag || !onCommitSchedule) return null;
+
+    return Gesture.Pan()
+      .activateAfterLongPress(450)
+      .runOnJS(true)
+      .onStart(() => {
+        onDragStart(block.id);
+      })
+      .onUpdate((e) => {
+        translateY.setValue(e.translationY);
+      })
+      .onEnd((e) => {
+        const deltaMin = Math.round(e.translationY / PIXELS_PER_MINUTE);
+        let next = block.start + deltaMin;
+        if (snapMinutes > 1) {
+          next = Math.round(next / snapMinutes) * snapMinutes;
+        }
+        const clamped = clampScheduleStartMinute(next, block.durationMinutes);
+        onCommitSchedule(block.goalId, block.id, clamped, block.durationMinutes);
+      })
+      .onFinalize(() => {
+        translateY.setValue(0);
+        onDragEnd();
+      });
+  }, [
+    block.durationMinutes,
+    block.goalId,
+    block.id,
+    block.start,
+    canDrag,
+    onCommitSchedule,
+    onDragEnd,
+    onDragStart,
+    snapMinutes,
+  ]);
+
+  const top = block.start * PIXELS_PER_MINUTE;
+  const height = Math.max((block.end - block.start) * PIXELS_PER_MINUTE, 1);
+  const compact = height < 26;
+  const laneW = 100 / block.laneCount;
+  const leftPct = (block.lane / block.laneCount) * 100;
+  const accent = accentForGoal(block.goalId, colors.primary, isDark);
+  const range = formatScheduleRange(block.start, block.end);
+  const isDragging = draggingId === block.id;
+
+  const layoutStyle = {
+    top,
+    height,
+    left: `${leftPct}%` as const,
+    width: `${laneW}%` as const,
+    paddingRight: 3,
+    opacity: block.done ? 0.55 : 1,
+    zIndex: isDragging ? 20 : 1,
+  };
+
+  const inner = (
+    <View
+      style={[
+        styles.blockInner,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          ...Platform.select({
+            ios: {
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 1 },
+              shadowOpacity: compact ? 0.04 : isDragging ? 0.14 : 0.08,
+              shadowRadius: isDragging ? 6 : 2,
+            },
+            android: { elevation: compact ? 1 : isDragging ? 6 : 2 },
+            default: {},
+          }),
+        },
+      ]}
+    >
+      <View style={[styles.accentBar, { backgroundColor: accent }]} />
+      <View
+        style={[styles.blockTextWrap, compact && styles.blockTextWrapCompact]}
+      >
+        <Text
+          style={[
+            styles.blockTitle,
+            compact && styles.blockTitleCompact,
+            {
+              color: colors.text,
+              textDecorationLine: block.done ? 'line-through' : 'none',
+            },
+          ]}
+          numberOfLines={compact ? 1 : 2}
+          {...Platform.select({
+            android: { includeFontPadding: compact ? false : true },
+            default: {},
+          })}
+        >
+          {block.title}
+        </Text>
+        {!compact ? (
+          <Text
+            style={[styles.blockTime, { color: colors.textSecondary }]}
+            numberOfLines={1}
+          >
+            {range}
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  );
+
+  if (!gesture) {
+    return (
+      <View
+        style={[styles.block, layoutStyle]}
+        accessibilityRole="text"
+        accessibilityLabel={`${block.title}, ${range}`}
+      >
+        {inner}
+      </View>
+    );
+  }
+
+  return (
+    <GestureDetector gesture={gesture}>
+      <Animated.View
+        style={[styles.block, layoutStyle, { transform: [{ translateY }] }]}
+        accessibilityRole="button"
+        accessibilityLabel={`${block.title}, ${range}`}
+        accessibilityHint="Long-press, then drag up or down to change the time on your schedule"
+      >
+        {inner}
+      </Animated.View>
+    </GestureDetector>
+  );
+}
+
 type Props = {
   entries: DailyQuestEntry[];
   completed: Record<string, boolean>;
   colors: ThemeColors;
   mode: ThemeMode;
+  /** Snap dropped start times to this many minutes (e.g. 15). */
+  snapMinutes?: number;
+  onCommitSchedule?: CommitScheduleFn;
 };
 
 export function DailyQuestDaySchedule({
@@ -120,10 +269,15 @@ export function DailyQuestDaySchedule({
   completed,
   colors,
   mode,
+  snapMinutes = 15,
+  onCommitSchedule,
 }: Props) {
   const isDark = mode === 'dark';
   const dayHeight = MINUTES_PER_DAY * PIXELS_PER_MINUTE;
   const scrollRef = useRef<ScrollView>(null);
+  const [scrollEnabled, setScrollEnabled] = useState(true);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+
   const defaultScrollY = useMemo(
     () => DEFAULT_SCROLL_START_MINUTE * PIXELS_PER_MINUTE,
     [],
@@ -156,6 +310,16 @@ export function DailyQuestDaySchedule({
     return () => cancelAnimationFrame(id);
   }, [entries, completed, scrollToDefaultMorning]);
 
+  const onDragStart = useCallback((id: string) => {
+    setDraggingId(id);
+    setScrollEnabled(false);
+  }, []);
+
+  const onDragEnd = useCallback(() => {
+    setDraggingId(null);
+    setScrollEnabled(true);
+  }, []);
+
   return (
     <View
       style={[
@@ -169,6 +333,7 @@ export function DailyQuestDaySchedule({
       <Text style={[styles.dayTitle, { color: colors.text }]}>{dayLabel}</Text>
       <Text style={[styles.subTitle, { color: colors.textSecondary }]}>
         12:00 AM – 11:59 PM
+        {onCommitSchedule ? ' · Long-press a block to move it' : ''}
       </Text>
       <ScrollView
         ref={scrollRef}
@@ -177,6 +342,7 @@ export function DailyQuestDaySchedule({
         showsVerticalScrollIndicator
         nestedScrollEnabled
         keyboardShouldPersistTaps="handled"
+        scrollEnabled={scrollEnabled}
         onContentSizeChange={() => {
           const g = layoutGenRef.current;
           if (scrolledForGenRef.current >= g) return;
@@ -222,91 +388,19 @@ export function DailyQuestDaySchedule({
                 ]}
               />
             ))}
-            {blocks.map((b) => {
-              const top = b.start * PIXELS_PER_MINUTE;
-              const height = Math.max(
-                (b.end - b.start) * PIXELS_PER_MINUTE,
-                1,
-              );
-              /** AI quests often use 15–30m blocks; a few px tall clips labels with overflow:hidden. */
-              const compact = height < 26;
-              const laneW = 100 / b.laneCount;
-              const leftPct = (b.lane / b.laneCount) * 100;
-              const accent = accentForGoal(b.goalId, colors.primary, isDark);
-              const range = formatScheduleRange(b.start, b.end);
-              return (
-                <View
-                  key={b.id}
-                  pointerEvents="none"
-                  style={[
-                    styles.block,
-                    {
-                      top,
-                      height,
-                      left: `${leftPct}%`,
-                      width: `${laneW}%`,
-                      paddingRight: 3,
-                      opacity: b.done ? 0.55 : 1,
-                      zIndex: 1,
-                    },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.blockInner,
-                      {
-                        backgroundColor: colors.surface,
-                        borderColor: colors.border,
-                        ...Platform.select({
-                          ios: {
-                            shadowColor: '#000',
-                            shadowOffset: { width: 0, height: 1 },
-                            shadowOpacity: compact ? 0.04 : 0.08,
-                            shadowRadius: 2,
-                          },
-                          android: { elevation: compact ? 1 : 2 },
-                          default: {},
-                        }),
-                      },
-                    ]}
-                  >
-                    <View style={[styles.accentBar, { backgroundColor: accent }]} />
-                    <View
-                      style={[
-                        styles.blockTextWrap,
-                        compact && styles.blockTextWrapCompact,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.blockTitle,
-                          compact && styles.blockTitleCompact,
-                          {
-                            color: colors.text,
-                            textDecorationLine: b.done ? 'line-through' : 'none',
-                          },
-                        ]}
-                        numberOfLines={compact ? 1 : 2}
-                        {...Platform.select({
-                          android: { includeFontPadding: compact ? false : true },
-                          default: {},
-                        })}
-                      >
-                        {b.title}
-                      </Text>
-                      {!compact ? (
-                        <Text
-                          style={[styles.blockTime, { color: colors.textSecondary }]}
-                          numberOfLines={1}
-                        >
-                          {range}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-                </View>
-              );
-            })}
+            {blocks.map((b) => (
+              <ScheduleQuestBlock
+                key={b.id}
+                block={b}
+                isDark={isDark}
+                colors={colors}
+                snapMinutes={snapMinutes}
+                draggingId={draggingId}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                onCommitSchedule={onCommitSchedule}
+              />
+            ))}
           </View>
         </View>
       </ScrollView>

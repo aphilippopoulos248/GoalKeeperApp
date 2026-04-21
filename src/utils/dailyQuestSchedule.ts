@@ -3,6 +3,27 @@ import type { Goal, Quest } from '../types';
 const WAKE_START_MINUTE = 6 * 60;
 const WAKE_END_MINUTE = 22 * 60;
 const DEFAULT_BLOCK_MINUTES = 45;
+const MIN_SCHEDULE_BLOCK_MINUTES = 15;
+const MAX_SCHEDULE_BLOCK_MINUTES = 120;
+
+/** Clamp daily block length to the same bounds as persisted quests / AI planner. */
+export function clampScheduleDurationMinutes(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_BLOCK_MINUTES;
+  return Math.min(
+    MAX_SCHEDULE_BLOCK_MINUTES,
+    Math.max(MIN_SCHEDULE_BLOCK_MINUTES, Math.round(n)),
+  );
+}
+
+/** Keep start so the half-open block [start, start + duration) fits in [0, 1440). */
+export function clampScheduleStartMinute(
+  startMinute: number,
+  durationMinutes: number,
+): number {
+  const d = clampScheduleDurationMinutes(durationMinutes);
+  const s = Math.round(startMinute);
+  return Math.min(1440 - d, Math.max(0, s));
+}
 
 function clampDayOrder(n: number): number {
   if (!Number.isFinite(n)) return 500;
@@ -27,7 +48,7 @@ export function resolveQuestScheduleBlock(
   const durationMinutes =
     typeof quest.scheduleDurationMinutes === 'number' &&
     Number.isFinite(quest.scheduleDurationMinutes)
-      ? Math.min(120, Math.max(15, Math.round(quest.scheduleDurationMinutes)))
+      ? clampScheduleDurationMinutes(quest.scheduleDurationMinutes)
       : DEFAULT_BLOCK_MINUTES;
   if (
     typeof quest.scheduleStartMinute === 'number' &&

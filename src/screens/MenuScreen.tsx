@@ -46,7 +46,7 @@ function prioritySortRank(p: GoalPriority): number {
 
 export function MenuScreen() {
   const { colors, mode } = useAppTheme();
-  const { goals } = useActiveGoals();
+  const { goals, updateDailyQuestSchedule } = useActiveGoals();
   const [sortMode, setSortMode] = useState<DailyQuestSortMode>('recommended');
   const [daySchedule, setDaySchedule] = useState(false);
   const {
@@ -217,6 +217,8 @@ export function MenuScreen() {
             completed={completed}
             colors={colors}
             mode={mode}
+            snapMinutes={15}
+            onCommitSchedule={updateDailyQuestSchedule}
           />
         ) : (
           displayedDailyQuestEntries.map((entry) => (

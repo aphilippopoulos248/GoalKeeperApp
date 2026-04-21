@@ -19,7 +19,11 @@ import {
   MilestoneFrequency,
   Quest,
 } from '../types';
-import { collectOccupiedDailySlots } from '../utils/dailyQuestSchedule';
+import {
+  clampScheduleDurationMinutes,
+  clampScheduleStartMinute,
+  collectOccupiedDailySlots,
+} from '../utils/dailyQuestSchedule';
 import { dailyQuestCountForPriority, parseGoalPriority } from '../utils/goalPriority';
 
 const GOALS_STORAGE_KEY = '@goalkeeper/active-goals-v1';
@@ -42,6 +46,12 @@ type ActiveGoalsContextValue = {
   getGoalById: (id: string) => Goal | undefined;
   removeGoal: (goalId: string) => void;
   toggleCheckpoint: (goalId: string, checkpointId: string) => void;
+  updateDailyQuestSchedule: (
+    goalId: string,
+    questId: string,
+    scheduleStartMinute: number,
+    scheduleDurationMinutes: number,
+  ) => void;
 };
 
 const ActiveGoalsContext = createContext<ActiveGoalsContextValue | null>(null);
@@ -339,6 +349,37 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     setGoals((prev) => prev.filter((g) => g.id !== goalId));
   }, []);
 
+  const updateDailyQuestSchedule = useCallback(
+    (
+      goalId: string,
+      questId: string,
+      scheduleStartMinute: number,
+      scheduleDurationMinutes: number,
+    ) => {
+      const d = clampScheduleDurationMinutes(scheduleDurationMinutes);
+      const s = clampScheduleStartMinute(scheduleStartMinute, d);
+      setGoals((prev) =>
+        prev.map((g) => {
+          if (g.id !== goalId) return g;
+          const dailies = g.dailyQuests;
+          if (!dailies?.length) return g;
+          let changed = false;
+          const nextDailies = dailies.map((q) => {
+            if (q.id !== questId || q.kind !== 'daily') return q;
+            changed = true;
+            return {
+              ...q,
+              scheduleStartMinute: s,
+              scheduleDurationMinutes: d,
+            };
+          });
+          return changed ? { ...g, dailyQuests: nextDailies } : g;
+        }),
+      );
+    },
+    [],
+  );
+
   const toggleCheckpoint = useCallback((goalId: string, checkpointId: string) => {
     setGoals((prev) => {
       const oldGoal = prev.find((g) => g.id === goalId);
@@ -413,8 +454,22 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const value = useMemo(
-    () => ({ goals, addGoal, getGoalById, removeGoal, toggleCheckpoint }),
-    [goals, addGoal, getGoalById, removeGoal, toggleCheckpoint],
+    () => ({
+      goals,
+      addGoal,
+      getGoalById,
+      removeGoal,
+      toggleCheckpoint,
+      updateDailyQuestSchedule,
+    }),
+    [
+      goals,
+      addGoal,
+      getGoalById,
+      removeGoal,
+      toggleCheckpoint,
+      updateDailyQuestSchedule,
+    ],
   );
 
   return (
