@@ -5,10 +5,11 @@ import Svg, { Circle, Line } from 'react-native-svg';
 import { useQuestProgress } from '../context/QuestProgressContext';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { spacing } from '../theme/spacing';
-import type { Checkpoint, Quest } from '../types';
+import type { Checkpoint, Goal } from '../types';
+import { computeGoalBarTargetPoints } from '../utils/goalBarTargetPoints';
 import {
-  computeActiveSegment,
-  computeQuestRatio,
+  computeBarHeadX,
+  computePointsBarFraction,
   computeTrackLayout,
   DOT_R,
   GOAL_R,
@@ -18,13 +19,12 @@ import {
 
 const ROW_HEIGHT = 22;
 const TRACK_STROKE = 2;
-const QUEST_STROKE = 1.5;
 
 type Props = {
-  /** Passed for call-site consistency; milestone math uses `checkpoints` and `dailyQuests`. */
-  goalId: string;
+  goal: Pick<Goal, 'id' | 'targetDateIso'>;
   checkpoints: Checkpoint[];
-  dailyQuests?: Quest[];
+  /** Kept for API compatibility; bar fill uses persisted goal bar points. */
+  dailyQuests?: unknown;
   /** When false, every checkpoint gets a dot (matches a full milestone list). Default true. */
   subsampling?: boolean;
   /** Fires with the measured inner track width (for unlock math on other screens). */
@@ -32,14 +32,14 @@ type Props = {
 };
 
 export function GoalMilestoneProgress({
-  goalId: _goalId,
+  goal,
   checkpoints,
-  dailyQuests,
+  dailyQuests: _dailyQuests,
   subsampling = true,
   onTrackWidthChange,
 }: Props) {
   const { colors } = useAppTheme();
-  const { completed } = useQuestProgress();
+  const { goalBarEarned } = useQuestProgress();
   const [trackWidth, setTrackWidth] = useState(0);
 
   const onTrackLayout = useCallback(
@@ -62,46 +62,42 @@ export function GoalMilestoneProgress({
   const n = slots.length;
   const cy = ROW_HEIGHT / 2;
 
-  const questRatio = useMemo(
-    () => computeQuestRatio(dailyQuests, completed),
-    [dailyQuests, completed],
+  const earned = goalBarEarned[goal.id] ?? 0;
+  const targetPoints = useMemo(
+    () => computeGoalBarTargetPoints(goal),
+    [goal.targetDateIso],
   );
-  const questTotal = useMemo(
-    () => (dailyQuests ?? []).filter((q) => q.kind === 'daily').length,
-    [dailyQuests],
+  const pointsFraction = useMemo(
+    () => computePointsBarFraction(earned, targetPoints),
+    [earned, targetPoints],
   );
-  const questDone = useMemo(() => {
-    const dailies = (dailyQuests ?? []).filter((q) => q.kind === 'daily');
-    return dailies.filter((q) => completed[q.id]).length;
-  }, [dailyQuests, completed]);
 
   const layout = useMemo(
     () => computeTrackLayout(trackWidth, n),
     [trackWidth, n],
   );
 
-  const activeSegment = useMemo(() => {
-    if (!layout) return null;
-    return computeActiveSegment(slots, layout.xs, TRACK_LEFT);
-  }, [layout, slots]);
+  const headX = useMemo(() => {
+    if (!layout) return TRACK_LEFT;
+    return computeBarHeadX(pointsFraction, TRACK_LEFT, layout.trackEndX);
+  }, [layout, pointsFraction]);
 
   if (total === 0) {
     return null;
   }
 
   const completedCp = checkpoints.filter((c) => c.done).length;
+  const earnedDisplay = Math.round(earned * 10) / 10;
 
-  const a11yQuest =
-    questTotal > 0
-      ? ` Daily quests for this goal: ${questDone} of ${questTotal} complete.`
-      : '';
+  const a11yPoints = ` Progress bar: ${earnedDisplay} of ${targetPoints} quest points.`;
+  const a11yMilestones = ` Milestones: ${completedCp} of ${total} complete.`;
 
   return (
     <View
       style={styles.row}
       accessible
       accessibilityRole="image"
-      accessibilityLabel={`Milestones: ${completedCp} of ${total} complete.${a11yQuest}`}
+      accessibilityLabel={`${a11yPoints}${a11yMilestones}`}
     >
       <View style={styles.trackWrap} onLayout={onTrackLayout}>
         {layout && (
@@ -115,45 +111,14 @@ export function GoalMilestoneProgress({
               strokeWidth={TRACK_STROKE}
             />
 
-            {slots[0].done && (
+            {pointsFraction > 0 && (
               <Line
                 x1={TRACK_LEFT}
                 y1={cy}
-                x2={layout.xs[0]}
+                x2={headX}
                 y2={cy}
                 stroke={colors.primary}
                 strokeWidth={TRACK_STROKE}
-              />
-            )}
-            {slots.map((slot, i) => {
-              if (i >= n - 1) return null;
-              const next = slots[i + 1];
-              if (!slot.done || !next.done) return null;
-              return (
-                <Line
-                  key={`cp-seg-${i}`}
-                  x1={layout.xs[i]}
-                  y1={cy}
-                  x2={layout.xs[i + 1]}
-                  y2={cy}
-                  stroke={colors.primary}
-                  strokeWidth={TRACK_STROKE}
-                />
-              );
-            })}
-
-            {activeSegment && questRatio > 0 && (
-              <Line
-                x1={activeSegment.x1}
-                y1={cy}
-                x2={
-                  activeSegment.x1 +
-                  questRatio * (activeSegment.x2 - activeSegment.x1)
-                }
-                y2={cy}
-                stroke={colors.primary}
-                strokeWidth={QUEST_STROKE}
-                strokeOpacity={0.85}
                 strokeLinecap="round"
               />
             )}
@@ -191,7 +156,7 @@ export function GoalMilestoneProgress({
         style={[styles.fraction, { color: colors.textSecondary }]}
         importantForAccessibility="no"
       >
-        {completedCp} / {total}
+        {earnedDisplay}/{targetPoints}
       </Text>
     </View>
   );

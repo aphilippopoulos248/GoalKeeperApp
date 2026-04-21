@@ -5,6 +5,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -31,6 +32,7 @@ function compareDailyEntriesByScheduleTime(a: DailyQuestEntry, b: DailyQuestEntr
 }
 
 const QUEST_COMPLETED_KEY = '@goalkeeper/quest-completed-v1';
+const GOAL_BAR_EARNED_KEY = '@goalkeeper/goal-bar-earned-v1';
 
 export type DailyQuestEntry = {
   goalId: string;
@@ -44,6 +46,8 @@ type QuestProgressValue = {
   dailyQuests: Quest[];
   dailyQuestEntries: DailyQuestEntry[];
   weeklyQuests: Quest[];
+  /** Per-goal quest points accumulated toward the milestone bar (persisted). */
+  goalBarEarned: Record<string, number>;
   streak: number;
   pointsToday: number;
   lifetimeQuestPoints: number;
@@ -72,11 +76,37 @@ async function saveCompleted(map: Record<string, boolean>): Promise<void> {
   await AsyncStorage.setItem(QUEST_COMPLETED_KEY, JSON.stringify(map));
 }
 
+async function loadGoalBarEarned(): Promise<Record<string, number>> {
+  try {
+    const raw = await AsyncStorage.getItem(GOAL_BAR_EARNED_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+async function saveGoalBarEarned(map: Record<string, number>): Promise<void> {
+  await AsyncStorage.setItem(GOAL_BAR_EARNED_KEY, JSON.stringify(map));
+}
+
 export function QuestProgressProvider({ children }: { children: React.ReactNode }) {
   const { goals } = useActiveGoals();
   const { streak, pointsToday, lifetimeQuestPoints, applyQuestToggle } =
     useDailyStreakAndPointsToday();
   const [completed, setCompleted] = useState<Record<string, boolean>>({});
+  const [goalBarEarned, setGoalBarEarned] = useState<Record<string, number>>({});
+  const completedRef = useRef<Record<string, boolean>>({});
+
+  useEffect(() => {
+    completedRef.current = completed;
+  }, [completed]);
 
   const activeGoals = useMemo(() => goals.filter((g) => !g.completed), [goals]);
 
@@ -114,8 +144,11 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const map = await loadCompleted();
-      if (!cancelled) setCompleted(map);
+      const [cMap, eMap] = await Promise.all([loadCompleted(), loadGoalBarEarned()]);
+      if (!cancelled) {
+        setCompleted(cMap);
+        setGoalBarEarned(eMap);
+      }
     })();
     return () => {
       cancelled = true;
@@ -127,17 +160,30 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
       const quest = allQuestsForToggle.find((q) => q.id === id);
       if (!quest) return;
 
-      setCompleted((prev) => {
-        const nextCompleted = !prev[id];
-        const nextMap = { ...prev, [id]: nextCompleted };
-        queueMicrotask(() => {
-          void saveCompleted(nextMap);
-          applyQuestToggle(quest, nextCompleted);
+      const prevDone = completedRef.current[id] ?? false;
+      const nextCompleted = !prevDone;
+      const nextMap = { ...completedRef.current, [id]: nextCompleted };
+      completedRef.current = nextMap;
+      setCompleted(nextMap);
+
+      const entry = dailyQuestEntries.find((e) => e.quest.id === id);
+      if (entry?.goalId) {
+        const delta = nextCompleted ? quest.points : -quest.points;
+        setGoalBarEarned((prevEarned) => {
+          const nextEarned = { ...prevEarned };
+          const cur = nextEarned[entry.goalId] ?? 0;
+          nextEarned[entry.goalId] = Math.max(0, cur + delta);
+          queueMicrotask(() => void saveGoalBarEarned(nextEarned));
+          return nextEarned;
         });
-        return nextMap;
+      }
+
+      queueMicrotask(() => {
+        void saveCompleted(nextMap);
+        applyQuestToggle(quest, nextCompleted);
       });
     },
-    [allQuestsForToggle, applyQuestToggle],
+    [allQuestsForToggle, applyQuestToggle, dailyQuestEntries],
   );
 
   const questsCompletedCount = useMemo(
@@ -152,6 +198,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
       dailyQuests,
       dailyQuestEntries,
       weeklyQuests,
+      goalBarEarned,
       streak,
       pointsToday,
       lifetimeQuestPoints,
@@ -163,6 +210,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
       dailyQuests,
       dailyQuestEntries,
       weeklyQuests,
+      goalBarEarned,
       streak,
       pointsToday,
       lifetimeQuestPoints,

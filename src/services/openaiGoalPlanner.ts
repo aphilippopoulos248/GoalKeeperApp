@@ -92,8 +92,9 @@ function getApiKey(): string {
 }
 
 function clampPoints(n: number): number {
-  if (!Number.isFinite(n)) return 12;
-  return Math.min(25, Math.max(10, Math.round(n)));
+  if (!Number.isFinite(n)) return 4;
+  /** Low range for testing milestone bar fill. */
+  return Math.min(6, Math.max(2, Math.round(n)));
 }
 
 function clampQuestCount(n: number): number {
@@ -351,7 +352,7 @@ Rules:
 function buildRegenSystem(dailyQuestCount: number): string {
   const n = clampQuestCount(dailyQuestCount);
   return `You are a goal-planning coach. Reply with a single JSON object only: { "dailyQuests": [ ... ] }.
-dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder", "startMinute", "durationMinutes" } with points 10–25, dayOrder 0–999, startMinute 0–1439, durationMinutes 15–120. Blocks must not overlap within the array; prefer 06:00–22:00. If the user JSON includes reservedScheduleSlots, treat each entry as a busy half-open interval [startMinute, endMinute)—your quests must not overlap those (one quest at a time globally).
+dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder", "startMinute", "durationMinutes" } with points 2–6, dayOrder 0–999, startMinute 0–1439, durationMinutes 15–120. Blocks must not overlap within the array; prefer 06:00–22:00. If the user JSON includes reservedScheduleSlots, treat each entry as a busy half-open interval [startMinute, endMinute)—your quests must not overlap those (one quest at a time globally).
 
 Rules:
 - The user message includes milestoneFrequency (weekly / biweekly / monthly). Align daily quest pacing and tone with that milestone cadence (e.g. smaller steps for weekly checkpoints vs monthly).
@@ -629,7 +630,7 @@ function parseFullResult(
     title = paired.title;
     description = paired.description;
     const points = q.points;
-    const pts = typeof points === 'number' ? clampPoints(points) : 12;
+    const pts = typeof points === 'number' ? clampPoints(points) : 4;
     const defaultOrder =
       n <= 1 ? 500 : Math.round((dqIndex / Math.max(n - 1, 1)) * 999);
     const orderRaw = q.dayOrder;
@@ -693,7 +694,7 @@ function parseDailyOnly(
     if (!paired) continue;
     title = paired.title;
     description = paired.description;
-    const pts = typeof q.points === 'number' ? clampPoints(q.points) : 12;
+    const pts = typeof q.points === 'number' ? clampPoints(q.points) : 4;
     const defaultOrder =
       n <= 1 ? 500 : Math.round((dqIndex / Math.max(n - 1, 1)) * 999);
     const orderRaw = q.dayOrder;

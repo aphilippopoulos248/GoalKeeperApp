@@ -10,9 +10,10 @@ import { useQuestProgress } from '../context/QuestProgressContext';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
+import { computeGoalBarTargetPoints } from '../utils/goalBarTargetPoints';
 import {
   computeBarHeadX,
-  computeQuestRatio,
+  computePointsBarFraction,
   computeTrackLayout,
   isCheckpointUnlockedByBar,
   TRACK_LEFT,
@@ -23,18 +24,13 @@ type Props = NativeStackScreenProps<GoalsStackParamList, 'GoalDetail'>;
 export function GoalDetailScreen({ route, navigation }: Props) {
   const { colors } = useAppTheme();
   const { getGoalById, removeGoal, toggleCheckpoint } = useActiveGoals();
-  const { completed } = useQuestProgress();
+  const { goalBarEarned } = useQuestProgress();
   const [trackWidth, setTrackWidth] = useState(0);
   const g = getGoalById(route.params.goalId);
 
   useEffect(() => {
     setTrackWidth(0);
   }, [route.params.goalId]);
-
-  const questRatio = useMemo(
-    () => (g ? computeQuestRatio(g.dailyQuests, completed) : 0),
-    [g, completed],
-  );
 
   const layout = useMemo(
     () =>
@@ -44,16 +40,21 @@ export function GoalDetailScreen({ route, navigation }: Props) {
     [g, trackWidth],
   );
 
+  const targetPoints = useMemo(
+    () => (g ? computeGoalBarTargetPoints(g) : 0),
+    [g],
+  );
+
+  const pointsFraction = useMemo(() => {
+    if (!g) return 0;
+    const earned = goalBarEarned[g.id] ?? 0;
+    return computePointsBarFraction(earned, targetPoints);
+  }, [g, goalBarEarned, targetPoints]);
+
   const headX = useMemo(() => {
-    if (!g || !layout) return 0;
-    return computeBarHeadX(
-      g.checkpoints,
-      layout.xs,
-      questRatio,
-      TRACK_LEFT,
-      layout.trackEndX,
-    );
-  }, [g, layout, questRatio]);
+    if (!layout) return 0;
+    return computeBarHeadX(pointsFraction, TRACK_LEFT, layout.trackEndX);
+  }, [layout, pointsFraction]);
 
   if (!g) {
     return (
@@ -115,7 +116,7 @@ export function GoalDetailScreen({ route, navigation }: Props) {
       ) : (
         <>
           <GoalMilestoneProgress
-            goalId={g.id}
+            goal={g}
             checkpoints={g.checkpoints}
             dailyQuests={g.dailyQuests}
             subsampling={false}
@@ -123,7 +124,7 @@ export function GoalDetailScreen({ route, navigation }: Props) {
           />
           {g.checkpoints.map((c, i) => {
             const unlocked = isCheckpointUnlockedByBar(c, i, layout, headX);
-            const lockedLabel = `Checkpoint: ${c.title}. Locked. Complete daily quests to advance the progress bar until it reaches this milestone.`;
+            const lockedLabel = `Checkpoint: ${c.title}. Locked. Complete daily quests to earn points; when the bar reaches this milestone, you can tap to complete it.`;
             const openLabel = `Checkpoint: ${c.title}. ${c.done ? 'Completed' : 'Not completed'}. Tap to toggle.`;
 
             return unlocked ? (

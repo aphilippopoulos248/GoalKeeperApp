@@ -80,7 +80,7 @@ export function GoalListScreen() {
                 </Text>
                 {item.checkpoints.length > 0 ? (
                   <GoalMilestoneProgress
-                    goalId={item.id}
+                    goal={item}
                     checkpoints={item.checkpoints}
                     dailyQuests={item.dailyQuests}
                   />

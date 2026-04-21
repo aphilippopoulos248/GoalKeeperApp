@@ -1,4 +1,4 @@
-import type { Checkpoint, Quest } from '../types';
+import type { Checkpoint } from '../types';
 
 export const MAX_VISIBLE_CHECKPOINTS = 12;
 export const TRACK_LEFT = 2;
@@ -53,56 +53,22 @@ export function computeTrackLayout(
   };
 }
 
-export function computeQuestRatio(
-  dailyQuests: Quest[] | undefined,
-  completed: Record<string, boolean>,
+export function computePointsBarFraction(
+  earned: number,
+  targetPoints: number,
 ): number {
-  const dailies = (dailyQuests ?? []).filter((q) => q.kind === 'daily');
-  if (dailies.length === 0) return 0;
-  const done = dailies.filter((q) => completed[q.id]).length;
-  return done / dailies.length;
+  if (targetPoints <= 0) return 0;
+  return Math.min(1, earned / targetPoints);
 }
 
-/** Segment used for quest partial stroke (same rules as the SVG). */
-export function computeActiveSegment(
-  slots: Checkpoint[],
-  xs: number[],
-  trackLeft: number,
-): { x1: number; x2: number } | null {
-  const n = slots.length;
-  if (n < 1) return null;
-  if (!slots[0].done) {
-    return { x1: trackLeft, x2: xs[0] };
-  }
-  for (let i = 0; i < n - 1; i += 1) {
-    if (!(slots[i].done && slots[i + 1].done)) {
-      return { x1: xs[i], x2: xs[i + 1] };
-    }
-  }
-  return null;
-}
-
-/**
- * Rightmost x reached by combined checkpoint + quest fill (leading edge of progress).
- */
+/** Leading edge of progress from points earned / target (0–1 along full track). */
 export function computeBarHeadX(
-  slots: Checkpoint[],
-  xs: number[],
-  questRatio: number,
+  pointsFraction: number,
   trackLeft: number,
   trackEndX: number,
 ): number {
-  const n = slots.length;
-  if (n < 1) return trackLeft;
-  if (!slots[0].done) {
-    return trackLeft + questRatio * (xs[0] - trackLeft);
-  }
-  for (let i = 0; i < n - 1; i += 1) {
-    if (!(slots[i].done && slots[i + 1].done)) {
-      return xs[i] + questRatio * (xs[i + 1] - xs[i]);
-    }
-  }
-  return trackEndX;
+  const f = Math.max(0, Math.min(1, pointsFraction));
+  return trackLeft + f * (trackEndX - trackLeft);
 }
 
 /** Whether the bar has advanced to this milestone’s dot (touching the dot edge counts). */
