@@ -34,6 +34,13 @@ import {
 
 type DailyQuestSortMode = 'recommended' | 'goal' | 'priority';
 
+const DEBUG_NARRATIVE_ALERT_MAX = 4000;
+
+function truncateForDebugAlert(s: string, max = DEBUG_NARRATIVE_ALERT_MAX): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, max)}…`;
+}
+
 function dayOrderValue(quest: DailyQuestEntry['quest']): number {
   return typeof quest.dayOrder === 'number' && Number.isFinite(quest.dayOrder)
     ? quest.dayOrder
@@ -213,9 +220,11 @@ export function MenuScreen() {
           return;
         }
         setDebugJournalText('');
-        Alert.alert('Debug journal', 'Saved. Daily quests were updated in place where possible.', [
-          { text: 'OK' },
-        ]);
+        Alert.alert(
+          'Debug journal',
+          `Saved. Daily quests were updated in place where possible.\n\n--- AI narrative (debug) ---\n\n${truncateForDebugAlert(res.narrative)}`,
+          [{ text: 'OK' }],
+        );
       } finally {
         setDebugJournalSaving(false);
       }

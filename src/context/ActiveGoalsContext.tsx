@@ -81,11 +81,12 @@ type ActiveGoalsContextValue = {
   /**
    * Save a progress journal entry and refresh daily quest copy in place (keeps quest ids / completions).
    * Requires sign-in. Ignores goals that do not yet have a full daily set (backfill handles those).
+   * On success, includes the counselor-synthesized narrative for debug display.
    */
   submitProgressJournal: (
     body: string,
     source: JournalEntrySource,
-  ) => Promise<{ ok: boolean; error?: string }>;
+  ) => Promise<{ ok: true; narrative: string } | { ok: false; error: string }>;
   /** Delete stored progress journal entries and clear in-memory AI context (debug). Requires sign-in. */
   clearAiProgressMemory: () => Promise<{ ok: boolean; error?: string }>;
 };
@@ -642,15 +643,15 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     async (body: string, source: JournalEntrySource) => {
       const trimmed = body.trim();
       if (!trimmed) {
-        return { ok: false as const, error: 'Entry is empty.' };
+        return { ok: false, error: 'Entry is empty.' };
       }
       if (userId === null) {
-        return { ok: false as const, error: 'Sign in to save progress notes for the AI.' };
+        return { ok: false, error: 'Sign in to save progress notes for the AI.' };
       }
       const previousNarrative = (await fetchProgressNarrative(userId)) ?? '';
       const row = await insertProgressJournalEntry({ userId, body: trimmed, source });
       if (!row) {
-        return { ok: false as const, error: 'Could not save your entry.' };
+        return { ok: false, error: 'Could not save your entry.' };
       }
       let synthesized: string;
       try {
@@ -665,15 +666,16 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
             : e instanceof Error && e.message.trim()
               ? e.message
               : 'Could not update progress story.';
-        return { ok: false as const, error: message };
+        return { ok: false, error: message };
       }
       const up = await upsertProgressNarrative(userId, synthesized);
       if (!up.ok) {
-        return { ok: false as const, error: up.error };
+        return { ok: false, error: up.error };
       }
-      journalContextForAiRef.current = synthesized.trim();
+      const narrative = synthesized.trim();
+      journalContextForAiRef.current = narrative;
       await refreshDailyQuestsWithJournalContext();
-      return { ok: true as const };
+      return { ok: true, narrative };
     },
     [userId, refreshDailyQuestsWithJournalContext],
   );

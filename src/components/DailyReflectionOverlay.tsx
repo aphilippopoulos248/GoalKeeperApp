@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   KeyboardAvoidingView,
   Platform,
@@ -27,6 +28,13 @@ function holdMsForMessage(message: string): number {
 const INTRO_MESSAGE = `What did you achieve today? What new skills did you use or build? What outcomes showed up, or what might happen next because of your progress?
 
 When you're ready, share a few lines — that context helps shape your next daily quests.`;
+
+const DEBUG_NARRATIVE_ALERT_MAX = 4000;
+
+function truncateForDebugAlert(s: string, max = DEBUG_NARRATIVE_ALERT_MAX): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, max)}…`;
+}
 
 type TypingIntroProps = {
   message: string;
@@ -116,7 +124,9 @@ function TypingIntro({ message, onComplete, onSkip, colors }: TypingIntroProps) 
 type DailyReflectionOverlayProps = {
   visible: boolean;
   onNotNow: () => void;
-  onSubmit: (body: string) => Promise<{ ok: boolean; error?: string }>;
+  onSubmit: (
+    body: string,
+  ) => Promise<{ ok: true; narrative: string } | { ok: false; error: string }>;
   onAfterClose: () => void;
 };
 
@@ -182,6 +192,13 @@ export function DailyReflectionOverlay({
           return;
         }
         onAfterClose();
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          Alert.alert(
+            'AI progress narrative (debug)',
+            truncateForDebugAlert(res.narrative),
+            [{ text: 'OK' }],
+          );
+        }
       } finally {
         setSaving(false);
       }
