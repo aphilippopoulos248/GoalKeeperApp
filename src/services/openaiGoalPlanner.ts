@@ -432,8 +432,9 @@ const DAILY_QUEST_COPY_AND_TIER_RULES = `Daily quest text (critical):
 - The user message includes "completedCheckpointCount" (number of milestones already completed) and a goal "title" and "description". Use them.
 - **Title vs description (must differ):** Each item MUST have a separate "title" and "description".
   - "title": at most **5 words**; short imperative (e.g. "Choose one book", "Run five kilometers"). No period at the end.
-  - "description": 1–3 sentences that **add** information the title does not cover: time window, how much (count, pages, minutes, reps, distance), where, or what "done" looks like. **Do not** copy the title, paste the same sentence, or use a near-paraphrase of the title. The description is the detail; the title is the hook.
-- **Passive + active (required):** If the quest centers on **consumption** (watch a video, listen to a podcast, read an article or tutorial mainly to learn), the **same quest** must also name a **concrete active follow-up** the user does after: e.g. write 2–3 bullets you will apply, one-sentence takeaway, try **one** technique once (mirror, message, or real interaction), a short voice memo plan, or 2 minutes of deliberate practice. **Forbidden:** passive-only lines ("watch…", "listen…", "read about…") with no output or practice step. Put the passive + active pair in **description** if the **title** must stay within 5 words (title can hint at both, e.g. "Watch clip, note takeaway").
+  - "description": **one short sentence only** (roughly 12–22 words max). Add only what the title omits: a light time window, duration, or what "done" looks like—no lists, no multi-step paragraphs, no extra examples. **Do not** copy the title, paste the same sentence, or use a near-paraphrase of the title.
+- **Cooking, meals, nutrition, meal prep:** Keep quests **category-level**, not menu-specific. **Forbidden** in title and description: naming a particular dish, cuisine specialty, or "make [named recipe]"; picking breakfast vs lunch vs dinner unless the goal itself is strictly about that one meal slot. Prefer lines like "Cook a healthy meal" / "Prep tomorrow's food" with a brief time or effort hint—the app’s AI Assist is where users get concrete meal or recipe ideas.
+- **Passive + active (required):** If the quest centers on **consumption** (watch a video, listen to a podcast, read an article or tutorial mainly to learn), the **same quest** must also name a **concrete active follow-up** the user does after—still inside **one short sentence** (e.g. watch one short clip **and** jot one takeaway). **Forbidden:** passive-only lines ("watch…", "listen…", "read about…") with no output or practice step. Put the passive + active pair in **description** if the **title** must stay within 5 words (title can hint at both, e.g. "Watch clip, note takeaway").
 - **Zero baseline (completedCheckpointCount is 0):** Assume the user has **not** already built the habit and may lack prior skill. No prerequisite skills—quests must be things a total beginner can do today. **Order** the dailyQuests array as a small ramp: first item = **shortest / easiest setup** (2–5 min, e.g. pick the book, find a 10-minute video, lay out shoes); later items in the list = **slightly** more (still easy: e.g. read 5 pages, then 10 pages; mirror talk for 1 minute). Forbid vague stems ("improve…", "work on…", "get better at…") unless the same line names a **concrete** action, object, and/or number.
 - **Milestone / progress scale:** follow the **Outcome proximity** block below (not "just harder"—closer to the goal over time).
 - **Examples (flavor only; match the user's goal):** "Read more" with 0 milestones: choose a book → read 5 pages → read 10 pages. "Socialize more" with 0: watch one short video on conversation skills **and** write two bullets you will try tomorrow → practice one of those in a mirror for 1 minute. "Get fit" with 2+ milestones: 20 push-ups in one set, run 5 km outside, etc.`;
@@ -647,8 +648,9 @@ Rules:
 }
 
 const SPOONACULAR_PLANNER_RULES = `Spoonacular context (applies when the user message includes a non-empty string "spoonacularContext"):
-- That string lists **real** recipe or nutrition-filtered meal ideas from a live food API. Use it to make at least one daily quest **concrete** (cook, prep, shop for a named dish, or align a meal with a macro pattern shown in the list).
-- Prefer referring to a **dish title** (or a clear, close paraphrase) from the list. Do not invent other recipe names, chain restaurants, or branded products not in "spoonacularContext".
+- That string lists **real** recipe or nutrition-filtered ideas from a food API—use it only to **inform** realistic habits (macros, timing, prep level). **Do not** paste dish names, recipe titles, or ingredient lists into any daily quest **title** or **description**.
+- Write food-related dailies as **generic actions** (e.g. cook one balanced meal, batch-prep vegetables, log meals, grocery run for staples). Users get **specific** meal ideas inside the app’s AI Assist, not in the quest card.
+- Do not invent recipe names, chain restaurants, or branded products not in "spoonacularContext" (and do not put list items verbatim into quests).
 - Keep the usual **goalType** rules: for "biological", do not promise a fixed per-week body-weight or body-fat outcome in quest text.
 - You may use other quest slots for complementary habits (timing, logging, prep environment) if they still fit the goal.`;
 
@@ -884,10 +886,10 @@ function pickOptionalDurationMinutes(record: Record<string, unknown>): number | 
 
 /** Shown when the model only returned a title (never duplicate title as body). */
 const QUEST_DESC_FALLBACK_WHEN_NO_BODY =
-  'Pick a 10–15 minute window and one clear "done" signal (timer, count, or a specific outcome) before you start.';
+  'Block 10–15 minutes and decide one simple “done” signal before you start.';
 
 const QUEST_DESC_FALLBACK_WHEN_DUPLICATE =
-  'Set a time window and a clear finishing line (timer, count, or one concrete outcome) before you start.';
+  'Choose a short time window and one clear finish line before you start.';
 
 function clampTitleToFiveWords(title: string): string {
   const t = title.trim();
@@ -895,6 +897,15 @@ function clampTitleToFiveWords(title: string): string {
   const words = t.split(/\s+/).filter((w) => w.length > 0);
   if (words.length <= 5) return t;
   return `${words.slice(0, 5).join(' ')}…`;
+}
+
+/** Keep menu copy short even if the model returns a long paragraph. */
+const QUEST_DESC_MAX_WORDS = 26;
+
+function clampShortQuestDescription(description: string): string {
+  const words = description.trim().split(/\s+/).filter((w) => w.length > 0);
+  if (words.length <= QUEST_DESC_MAX_WORDS) return words.join(' ');
+  return `${words.slice(0, QUEST_DESC_MAX_WORDS).join(' ')}…`;
 }
 
 /**
@@ -923,6 +934,7 @@ function finalizeQuestTitleDescription(
     }
     d = QUEST_DESC_FALLBACK_WHEN_DUPLICATE;
   }
+  d = clampShortQuestDescription(d);
   return { title: t, description: d };
 }
 
