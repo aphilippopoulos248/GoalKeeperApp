@@ -43,8 +43,8 @@ export function RegisterScreen({ navigation }: Props) {
         setErrorMessage(error.message);
         return;
       }
+      await setGreetingIntentNewAccount(email);
       if (data.session) {
-        setGreetingIntentNewAccount();
         return;
       }
       setSuccessMessage(

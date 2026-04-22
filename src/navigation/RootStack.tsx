@@ -120,10 +120,13 @@ export function RootStack() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (event === 'SIGNED_IN' && nextSession?.user) {
-        const kind = consumeGreetingIntent() ?? 'returning';
-        setGreetingAccountKind(kind);
-        setGreetingUser(nextSession.user);
-        setShowGreeting(true);
+        const user = nextSession.user;
+        void (async () => {
+          const kind = (await consumeGreetingIntent(user)) ?? 'returning';
+          setGreetingAccountKind(kind);
+          setGreetingUser(user);
+          setShowGreeting(true);
+        })();
       }
       if (event === 'SIGNED_OUT') {
         setShowGreeting(false);
