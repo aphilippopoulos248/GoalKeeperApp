@@ -106,17 +106,64 @@ export async function hasProgressJournalOnDate(
   return (data?.length ?? 0) > 0;
 }
 
-/** Removes all progress journal entries for the user (clears what the quest AI reads from the journal). */
+/** Counselor-synthesized story for quest generation (one row per user). */
+export async function fetchProgressNarrative(userId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('progress_narrative')
+    .select('body')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[fetchProgressNarrative]', error);
+    return null;
+  }
+  const body = (data as { body?: string } | null)?.body;
+  if (typeof body !== 'string' || !body.trim()) {
+    return null;
+  }
+  return body.trim();
+}
+
+export async function upsertProgressNarrative(
+  userId: string,
+  body: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const trimmed = body.trim();
+  if (!trimmed) {
+    return { ok: false, error: 'Narrative is empty.' };
+  }
+  const { error } = await supabase.from('progress_narrative').upsert(
+    {
+      user_id: userId,
+      body: trimmed,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id' },
+  );
+  if (error) {
+    console.error('[upsertProgressNarrative]', error);
+    return { ok: false, error: error.message || 'Could not save narrative.' };
+  }
+  return { ok: true };
+}
+
+/** Removes all progress journal entries and the counselor narrative (full AI context reset). */
 export async function deleteAllProgressJournalEntriesForUser(
   userId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { error } = await supabase
+  const { error: jErr } = await supabase
     .from('progress_journal_entries')
     .delete()
     .eq('user_id', userId);
-  if (error) {
-    console.error('[deleteAllProgressJournalEntriesForUser]', error);
-    return { ok: false, error: error.message || 'Could not clear journal.' };
+  if (jErr) {
+    console.error('[deleteAllProgressJournalEntriesForUser] journal', jErr);
+    return { ok: false, error: jErr.message || 'Could not clear journal.' };
+  }
+  const { error: nErr } = await supabase.from('progress_narrative').delete().eq('user_id', userId);
+  if (nErr) {
+    console.error('[deleteAllProgressJournalEntriesForUser] narrative', nErr);
+    return { ok: false, error: nErr.message || 'Could not clear progress narrative.' };
   }
   return { ok: true };
 }

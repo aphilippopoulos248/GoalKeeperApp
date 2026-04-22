@@ -13,9 +13,11 @@ import { fetchGoalsForUser, syncGoalsForUser } from '../services/supabase/goalsR
 import { fetchLifeScheduleSlots, replaceLifeScheduleSlots } from '../services/supabase/lifeScheduleRepository';
 import {
   deleteAllProgressJournalEntriesForUser,
+  fetchProgressNarrative,
   fetchRecentProgressJournal,
   formatJournalRowsForAi,
   insertProgressJournalEntry,
+  upsertProgressNarrative,
   type JournalEntrySource,
 } from '../services/supabase/progressJournalRepository';
 import { migrateLegacyLocalData } from '../services/supabase/legacyMigration';
@@ -24,6 +26,8 @@ import {
   parseLifeBusySlotsFromMessage,
   regenerateDailyQuests,
   repositionDailyQuestsPreservingQuests,
+  synthesizeProgressNarrative,
+  USER_PROGRESS_JOURNAL_MAX_CHARS,
 } from '../services/openaiGoalPlanner';
 import type {
   GoalPlannerFullResult,
@@ -272,13 +276,37 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     void (async () => {
       await migrateLegacyLocalData(userId);
       if (cancelled) return;
-      const [loadedGoals, slots, journalRows] = await Promise.all([
+      const [loadedGoals, slots, journalRows, existingNarrative] = await Promise.all([
         fetchGoalsForUser(userId),
         fetchLifeScheduleSlots(userId),
         fetchRecentProgressJournal(userId),
+        fetchProgressNarrative(userId),
       ]);
       if (cancelled) return;
-      journalContextForAiRef.current = formatJournalRowsForAi(journalRows);
+      let refText = (existingNarrative ?? '').trim();
+      if (!refText && journalRows.length > 0) {
+        try {
+          const bundle = formatJournalRowsForAi(journalRows);
+          const capped =
+            bundle.length > USER_PROGRESS_JOURNAL_MAX_CHARS
+              ? `${bundle.slice(0, USER_PROGRESS_JOURNAL_MAX_CHARS)}…`
+              : bundle;
+          const synthesized = await synthesizeProgressNarrative({
+            previousNarrative: '',
+            newEntry: capped,
+          });
+          const up = await upsertProgressNarrative(userId, synthesized);
+          if (up.ok) {
+            refText = synthesized.trim();
+          } else {
+            refText = bundle;
+          }
+        } catch (e) {
+          console.error('[bootstrap progress narrative]', e);
+          refText = formatJournalRowsForAi(journalRows);
+        }
+      }
+      journalContextForAiRef.current = refText;
       setGoals(loadedGoals);
       setLifeScheduleSlots(slots);
       lifeScheduleSlotsRef.current = slots;
@@ -619,12 +647,31 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       if (userId === null) {
         return { ok: false as const, error: 'Sign in to save progress notes for the AI.' };
       }
+      const previousNarrative = (await fetchProgressNarrative(userId)) ?? '';
       const row = await insertProgressJournalEntry({ userId, body: trimmed, source });
       if (!row) {
         return { ok: false as const, error: 'Could not save your entry.' };
       }
-      const rows = await fetchRecentProgressJournal(userId);
-      journalContextForAiRef.current = formatJournalRowsForAi(rows);
+      let synthesized: string;
+      try {
+        synthesized = await synthesizeProgressNarrative({
+          previousNarrative: previousNarrative,
+          newEntry: trimmed,
+        });
+      } catch (e) {
+        const message =
+          e instanceof GoalPlannerError
+            ? e.message
+            : e instanceof Error && e.message.trim()
+              ? e.message
+              : 'Could not update progress story.';
+        return { ok: false as const, error: message };
+      }
+      const up = await upsertProgressNarrative(userId, synthesized);
+      if (!up.ok) {
+        return { ok: false as const, error: up.error };
+      }
+      journalContextForAiRef.current = synthesized.trim();
       await refreshDailyQuestsWithJournalContext();
       return { ok: true as const };
     },

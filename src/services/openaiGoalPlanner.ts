@@ -438,10 +438,77 @@ function capUserProgressJournal(s: string | undefined): string | null {
   return `${t.slice(0, USER_PROGRESS_JOURNAL_MAX_CHARS)}…`;
 }
 
+/** Cap what we send into the synthesis prompt (token control). */
+const SYNTHESIS_INPUT_WINDOW = 14_000;
+
+function capSynthesisInputs(previousNarrative: string, newEntry: string): {
+  previousNarrative: string;
+  newEntry: string;
+} {
+  let p = previousNarrative.trim();
+  let n = newEntry.trim();
+  const total = p.length + n.length;
+  if (total <= SYNTHESIS_INPUT_WINDOW) {
+    return { previousNarrative: p, newEntry: n };
+  }
+  if (n.length >= SYNTHESIS_INPUT_WINDOW) {
+    return { previousNarrative: '', newEntry: n.slice(0, SYNTHESIS_INPUT_WINDOW) };
+  }
+  const budgetForPrev = SYNTHESIS_INPUT_WINDOW - n.length;
+  if (p.length > budgetForPrev) {
+    p = `…${p.slice(-Math.max(0, budgetForPrev - 1))}`;
+  }
+  return { previousNarrative: p, newEntry: n };
+}
+
+const SYNTHESIZE_PROGRESS_NARRATIVE_SYSTEM = `You integrate a user's new check-in into one counselor-style progress story (plain text, not JSON inside the story).
+Reply with a single JSON object only (no markdown): { "narrative": string }
+
+Rules for "narrative":
+- Write in third person or neutral second person ("They" / "The user" or "You have…")—supportive, chronological, concise.
+- Merge the previous story (if any) with the new entry. When the new information conflicts with or completes an earlier plan (e.g. they already attended an event they previously planned to attend), **update the facts**: state what happened, and **remove** obsolete open actions that are now done.
+- Prefer short sections if useful: what is **settled / done** vs **open threads / possible next steps**—but keep it one coherent narrative, not bullet lists of raw logs.
+- Do not repeat the same event as both "to do" and "done." The story should reflect a **single current state** for quest planning.
+- Keep names, places, and events the user mentioned. Be specific.
+- Max length for "narrative": stay under ${USER_PROGRESS_JOURNAL_MAX_CHARS} characters.`;
+
+export async function synthesizeProgressNarrative(params: {
+  previousNarrative: string;
+  newEntry: string;
+}): Promise<string> {
+  const { previousNarrative, newEntry } = capSynthesisInputs(
+    params.previousNarrative,
+    params.newEntry,
+  );
+  if (!newEntry.trim()) {
+    const fallback = params.previousNarrative.trim();
+    return capUserProgressJournal(fallback) ?? '';
+  }
+  const user = JSON.stringify({ previousNarrative, newEntry });
+  const data = await postChatJson(SYNTHESIZE_PROGRESS_NARRATIVE_SYSTEM, user, {
+    temperature: 0.35,
+  });
+  if (!isRecord(data)) {
+    throw new GoalPlannerError('Invalid synthesis JSON', 'bad_response');
+  }
+  const raw =
+    typeof data.narrative === 'string'
+      ? data.narrative
+      : typeof data.story === 'string'
+        ? data.story
+        : '';
+  const t = raw.trim();
+  if (!t) {
+    throw new GoalPlannerError('Empty narrative from model', 'bad_response');
+  }
+  return capUserProgressJournal(t) ?? t;
+}
+
 const DAILY_QUEST_USER_JOURNAL_RULES = `User-reported progress (applies when the user JSON field "userProgressJournal" is a non-empty string):
-- Treat it as first-class context: the user described what they achieved, learned, or found recently. Use **concrete names** they gave (event titles, people, books, places, products, skills).
-- Propose a **sensible next small step in the same thread** (e.g. if they found a specific social event, a quest can be to book or register for **that named event**; if they sketched a next milestone, reflect it in a one-day action).
-- The journal may include unrelated life detail: prioritize what fits this goal’s title and description; ignore what does not.
+- This field is a **single reconciled counselor-style story** of the user’s recent progress, **not** a list of raw journal lines. It already merges updates (e.g. if they later say they completed something, the story should reflect the current state, not a stale “to do”).
+- Use **concrete names** the story mentions (event titles, people, books, places, products, skills). Treat the story as the source of truth for what is **settled** vs what is an **open thread**.
+- **Do not** assign daily quests for actions the story describes as **already completed** or no longer needed. Propose only **sensible next small steps** for **open threads** that still fit this goal.
+- The story may include unrelated life detail: prioritize what fits this goal’s title and description; ignore what does not.
 - You must still obey all other system rules: one-day scale, no verbatim milestone text, reservedScheduleSlots, Outcome proximity, and replace-mode anti-repetition when applicable.`;
 
 const REGEN_ANTI_REPETITION_RULES = `Replace mode (applies when user JSON has "replacePreviousQuests": true and a non-empty "previousDailyQuests" array):
