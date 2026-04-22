@@ -22,10 +22,15 @@ import type { MainStackParamList } from '../navigation/MainStack';
 import {
   fallbackChatOnlyReply,
   fallbackExerciseAssistIntro,
+  fallbackJobAssistIntro,
   fallbackQuestAssistIntro,
   planQuestAssistTurn,
   type QuestAssistHistoryEntry,
 } from '../services/questAssistOpenai';
+import {
+  fetchJobSuggestionsForAssist,
+  type AssistJob,
+} from '../services/jsearchRapidApi';
 import {
   assistExercisesFromRecent,
   fetchExerciseSuggestionsForAssist,
@@ -82,6 +87,7 @@ type ChatMessage =
       fullRecipe?: AssistFullRecipe;
       exercises?: AssistExercise[];
       fullExercise?: AssistFullExercise;
+      jobs?: AssistJob[];
     };
 
 function extractRecentRecipesFromMessages(messages: ChatMessage[]): {
@@ -122,6 +128,23 @@ function extractRecentExercisesFromMessages(messages: ChatMessage[]): {
   return out;
 }
 
+function extractRecentJobsFromMessages(messages: ChatMessage[]): {
+  id: string;
+  title: string;
+  employerName: string;
+}[] {
+  const out: { id: string; title: string; employerName: string }[] = [];
+  for (const m of messages) {
+    if (m.role !== 'assistant') continue;
+    if ('jobs' in m && m.jobs?.length) {
+      for (const j of m.jobs) {
+        out.push({ id: j.jobId, title: j.title, employerName: j.employerName });
+      }
+    }
+  }
+  return out;
+}
+
 function dedupeRecentAssistExercises(
   recent: { id: string; name: string }[],
 ): { id: string; name: string }[] {
@@ -152,6 +175,8 @@ function toPlannerHistory(messages: ChatMessage[]): QuestAssistHistoryEntry[] {
         : undefined;
     const fullExerciseId =
       'fullExercise' in m && m.fullExercise ? m.fullExercise.id : undefined;
+    const jobIds =
+      'jobs' in m && m.jobs?.length ? m.jobs.map((j) => j.jobId) : undefined;
     return {
       role: 'assistant',
       text: m.text,
@@ -159,6 +184,7 @@ function toPlannerHistory(messages: ChatMessage[]): QuestAssistHistoryEntry[] {
       fullRecipeSpoonacularId,
       exerciseIds,
       fullExerciseId,
+      jobIds,
     };
   });
 }
@@ -300,6 +326,7 @@ export function QuestAssistScreen() {
       const prior = allMessages.slice(0, -1);
       const recentRecipes = extractRecentRecipesFromMessages(prior);
       const recentExercises = extractRecentExercisesFromMessages(prior);
+      const recentJobs = extractRecentJobsFromMessages(prior);
       const history = toPlannerHistory(prior);
 
       const plan = await planQuestAssistTurn({
@@ -310,6 +337,7 @@ export function QuestAssistScreen() {
         questDescription: quest.description,
         recentRecipes,
         recentExercises,
+        recentJobs,
         history,
         latestUserMessage: userMessage,
       });
@@ -318,6 +346,7 @@ export function QuestAssistScreen() {
       let fullRecipe: AssistFullRecipe | undefined;
       let exercises: AssistExercise[] | undefined;
       let fullExercise: AssistFullExercise | undefined;
+      let jobs: AssistJob[] | undefined;
       let text = plan.reply.trim();
 
       if (plan.intent === 'suggest_recipes') {
@@ -382,6 +411,17 @@ export function QuestAssistScreen() {
           exercises = withRapidApiExerciseAnimationUrls(exercises);
         }
         if (!text) text = fallbackExerciseAssistIntro(!!exercises?.length);
+      } else if (plan.intent === 'suggest_jobs') {
+        const list = await fetchJobSuggestionsForAssist({
+          goalTitle: goal.title,
+          goalDescription: goal.description,
+          goalTimeBound: goal.timeBound,
+          questTitle: quest.title,
+          questDescription: quest.description,
+          userMessage,
+        });
+        jobs = list ?? undefined;
+        if (!text) text = fallbackJobAssistIntro(!!jobs?.length);
       } else if (plan.intent === 'full_exercise') {
         let eid = resolveAssistFullExerciseId({
           explicitId: plan.fullExerciseId,
@@ -428,6 +468,7 @@ export function QuestAssistScreen() {
         fullRecipe,
         exercises,
         fullExercise,
+        jobs,
       };
       setMessages([...allMessages, assistantMsg]);
     },
@@ -820,6 +861,56 @@ export function QuestAssistScreen() {
                     </ScrollView>
                   </View>
                 ) : null}
+                {msg.role === 'assistant' && 'jobs' in msg && msg.jobs && msg.jobs.length > 0 ? (
+                  <View style={styles.jobList}>
+                    {msg.jobs.map((j) => (
+                      <Pressable
+                        key={`${msg.id}-${j.jobId}`}
+                        onPress={() => {
+                          if (j.applyUrl) void Linking.openURL(j.applyUrl);
+                        }}
+                        style={[
+                          styles.jobCard,
+                          {
+                            backgroundColor: colors.surfaceElevated,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[styles.jobTitle, { color: colors.text }]}
+                          numberOfLines={2}
+                        >
+                          {j.title}
+                        </Text>
+                        <Text
+                          style={[styles.jobEmployer, { color: colors.textSecondary }]}
+                          numberOfLines={1}
+                        >
+                          {j.employerName}
+                        </Text>
+                        <Text style={[styles.jobMeta, { color: colors.textSecondary }]} numberOfLines={2}>
+                          {[
+                            j.location,
+                            j.employmentType,
+                            j.isRemote ? 'Remote' : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </Text>
+                        {j.applyUrl ? (
+                          <Text style={[styles.jobLink, { color: colors.primary }]} numberOfLines={1}>
+                            View / apply
+                          </Text>
+                        ) : (
+                          <Text style={[styles.jobMeta, { color: colors.textSecondary }]}>
+                            Open via employer site
+                          </Text>
+                        )}
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
               </View>
             ))}
           </ScrollView>
@@ -1068,6 +1159,34 @@ const styles = StyleSheet.create({
   },
   fullExerciseScroll: {
     maxHeight: 220,
+  },
+  jobList: {
+    marginTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  jobCard: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: spacing.md,
+  },
+  jobTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: spacing.xs,
+  },
+  jobEmployer: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: spacing.xs,
+  },
+  jobMeta: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  jobLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: spacing.sm,
   },
   composer: {
     flexDirection: 'row',

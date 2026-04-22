@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 
 import type { GoalType, MilestoneFrequency, Quest } from '../types';
 import { parseGoalType } from '../utils/goalNormalize';
+import { getJobSearchContextForGoal } from './jsearchRapidApi';
 import { getNutritionContextForGoal } from './spoonacularRecipes';
 
 export type PlannerDailyQuest = {
@@ -654,6 +655,13 @@ const SPOONACULAR_PLANNER_RULES = `Spoonacular context (applies when the user me
 - Keep the usual **goalType** rules: for "biological", do not promise a fixed per-week body-weight or body-fat outcome in quest text.
 - You may use other quest slots for complementary habits (timing, logging, prep environment) if they still fit the goal.`;
 
+const JSEARCH_PLANNER_RULES = `JSearch job market context (applies when the user message includes a non-empty string "jsearchContext"):
+- That string summarizes **real** recent job listings from a search API—use it only to **inform** realistic job-search progression: skills to highlight, pipeline habits, interview prep, networking, application cadence.
+- **Do not** paste job titles, employer names, or listing text verbatim into daily quest **titles** or **descriptions**. Write quests as **generic actions** (e.g. "Tailor resume to one target role family", "Complete one mock interview question", "Identify three companies to research").
+- **Do not** promise the user will be hired at any specific employer or role named in jsearchContext.
+- Checkpoint "label" strings remain "" where required; SMART fields and dailies should still feel credible for **job search** when the goal is career-related.
+- You may refer **abstractly** to skills or role families suggested by the sample (e.g. "roles in this lane often emphasize communication") without quoting listings.`;
+
 function appendSpoonacularRules(
   system: string,
   spoonacularContext: string | null,
@@ -664,6 +672,23 @@ function appendSpoonacularRules(
 ${SPOONACULAR_PLANNER_RULES}`;
   }
   return system;
+}
+
+function appendJSearchRules(system: string, jsearchContext: string | null): string {
+  if (typeof jsearchContext === 'string' && jsearchContext.trim().length > 0) {
+    return `${system}
+
+${JSEARCH_PLANNER_RULES}`;
+  }
+  return system;
+}
+
+function appendPlannerExternalContext(
+  system: string,
+  spoonacularContext: string | null,
+  jsearchContext: string | null,
+): string {
+  return appendJSearchRules(appendSpoonacularRules(system, spoonacularContext), jsearchContext);
 }
 
 function buildRegenSystem(dailyQuestCount: number, goalType: GoalType): string {
@@ -1269,6 +1294,9 @@ export async function repositionDailyQuestsPreservingQuests(
 
 const MILESTONE_REVEAL_TITLE_MAX = 160;
 
+const JSEARCH_MILESTONE_RULES = `JSearch context (applies when user JSON has non-empty "jsearchContext"):
+- The string is a **sample** of real job listings—use only to shape a **credible** job-search milestone (pipeline, skills, prep). **Do not** name specific employers or job titles from the list. **Do not** imply a guaranteed offer.`;
+
 const GENERATE_MILESTONE_FROM_CONTEXT_SYSTEM = `You write ONE milestone title for a goal-tracking app. Reply with JSON only: { "title": string }.
 
 Rules:
@@ -1291,6 +1319,17 @@ export async function generateMilestoneFromContext(
   const revealedPriorTitles = params.revealedPriorTitles
     .map((t) => t.trim())
     .filter((t) => t.length > 0);
+
+  let jsearchContext: string | null = null;
+  try {
+    jsearchContext = await getJobSearchContextForGoal({
+      title: params.title,
+      description: params.description,
+    });
+  } catch {
+    jsearchContext = null;
+  }
+
   const user = JSON.stringify({
     goalTitle: params.title.trim(),
     goalDescription: params.description.trim(),
@@ -1310,8 +1349,17 @@ export async function generateMilestoneFromContext(
     progressSummary: `Unlocking milestone ${params.milestoneIndex} of ${params.totalMilestones}. Completed checkpoints so far: ${params.completedCheckpointCount}.`,
     targetDateIso: params.targetDateIso,
     todayIso: params.todayIso,
+    ...(jsearchContext ? { jsearchContext } : {}),
   });
-  const data = await postChatJson(GENERATE_MILESTONE_FROM_CONTEXT_SYSTEM, user, {
+
+  let system = GENERATE_MILESTONE_FROM_CONTEXT_SYSTEM;
+  if (typeof jsearchContext === 'string' && jsearchContext.trim().length > 0) {
+    system = `${system}
+
+${JSEARCH_MILESTONE_RULES}`;
+  }
+
+  const data = await postChatJson(system, user, {
     temperature: 0.45,
   });
   if (!isRecord(data)) {
@@ -1350,6 +1398,16 @@ export async function planNewGoal(
     spoonacularContext = null;
   }
 
+  let jsearchContext: string | null = null;
+  try {
+    jsearchContext = await getJobSearchContextForGoal({
+      title: params.title,
+      description: params.description,
+    });
+  } catch {
+    jsearchContext = null;
+  }
+
   const user = JSON.stringify({
     title: params.title,
     description: params.description,
@@ -1364,10 +1422,11 @@ export async function planNewGoal(
     expectedWeekOffsets: checkpointPlan.expectedWeekOffsets,
     reservedScheduleSlots: params.reservedScheduleSlots ?? [],
     ...(spoonacularContext ? { spoonacularContext } : {}),
+    ...(jsearchContext ? { jsearchContext } : {}),
   });
 
   const runOnce = async (isRetry: boolean): Promise<GoalPlannerFullResult> => {
-    let system = appendSpoonacularRules(
+    let system = appendPlannerExternalContext(
       buildFullSystem(
         dailyQuestCount,
         milestoneFrequency,
@@ -1375,6 +1434,7 @@ export async function planNewGoal(
         goalType,
       ),
       spoonacularContext,
+      jsearchContext,
     );
     if (isRetry) {
       system += `
@@ -1427,6 +1487,16 @@ export async function regenerateDailyQuests(
     spoonacularContext = null;
   }
 
+  let jsearchContext: string | null = null;
+  try {
+    jsearchContext = await getJobSearchContextForGoal({
+      title: params.title,
+      description: params.description,
+    });
+  } catch {
+    jsearchContext = null;
+  }
+
   const user = JSON.stringify({
     title: params.title,
     description: params.description,
@@ -1446,10 +1516,11 @@ export async function regenerateDailyQuests(
     /** Unique per request so the model treats each refresh as a new generation, not a tweak of the last. */
     regenerationRequestId: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
     ...(spoonacularContext ? { spoonacularContext } : {}),
+    ...(jsearchContext ? { jsearchContext } : {}),
   });
 
   const data = await postChatJson(
-    appendSpoonacularRules(buildRegenSystem(dailyQuestCount, goalType), spoonacularContext),
+    appendPlannerExternalContext(buildRegenSystem(dailyQuestCount, goalType), spoonacularContext, jsearchContext),
     user,
     { temperature: replacePreviousQuests ? 0.72 : 0.35 },
   );

@@ -5,6 +5,7 @@ import {
   isQuestAssistExerciseRelated,
   userWantsExerciseVisuals,
 } from '../utils/exerciseGoalDetection';
+import { isQuestAssistJobRelated } from '../utils/jobGoalDetection';
 
 const MODEL = 'gpt-4o-mini';
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
@@ -40,6 +41,8 @@ export type QuestAssistHistoryEntry = {
   exerciseIds?: string[];
   /** When the assistant showed full exercise instructions. */
   fullExerciseId?: string;
+  /** JSearch job_ids from job listing cards. */
+  jobIds?: string[];
 };
 
 export type QuestAssistPlan = {
@@ -49,7 +52,8 @@ export type QuestAssistPlan = {
     | 'nutrition_for_recipe'
     | 'full_recipe'
     | 'suggest_exercises'
-    | 'full_exercise';
+    | 'full_exercise'
+    | 'suggest_jobs';
   reply: string;
   nutritionRecipeId: number | null;
   nutritionRecipeTitleHint: string | null;
@@ -59,10 +63,10 @@ export type QuestAssistPlan = {
   fullExerciseNameHint: string | null;
 };
 
-const PLANNER_SYSTEM = `You are the routing brain for a short "quest assist" chat. The app may attach recipe cards, full recipes (ingredients + steps), or nutrient data from Spoonacular, and/or exercise cards and full exercise instructions from ExerciseDB—you decide what is needed for this turn.
+const PLANNER_SYSTEM = `You are the routing brain for a short "quest assist" chat. The app may attach recipe cards, full recipes (ingredients + steps), or nutrient data from Spoonacular, exercise cards and full exercise instructions from ExerciseDB, and/or **job listing cards** from JSearch (RapidAPI)—you decide what is needed for this turn.
 
 Output a single JSON object only (no markdown fences) with exactly these keys:
-- "intent": one of "chat_only", "suggest_recipes", "nutrition_for_recipe", "full_recipe", "suggest_exercises", "full_exercise"
+- "intent": one of "chat_only", "suggest_recipes", "nutrition_for_recipe", "full_recipe", "suggest_exercises", "full_exercise", "suggest_jobs"
 - "reply": string — plain text, no markdown. Must **directly answer** the user's latest message in a natural way.
 - "nutritionRecipeId": number or null — use when intent is nutrition_for_recipe and the recipe is in "Recipes shown in this chat".
 - "nutritionRecipeTitleHint": string or null — only if nutrition id is unknown: best dish name to search.
@@ -83,9 +87,11 @@ Intent rules (exercise):
 
 5) **suggest_exercises** — User wants **new** exercise or workout **ideas** ("what should I do for legs", "more exercises", movement ideas). Card grid only. If they also ask for **images/GIFs** of several exercises already listed, you may answer with **chat_only** and a short line—the app can attach demos for exercises already in context.
 
-6) **chat_only** — Motivation, planning, generic tips without needing recipe/nutrition/exercise API data.
+6) **suggest_jobs** — User wants to **see job listings** or **search openings** for a role, company type, or location ("find software engineer jobs in Austin", "show me remote data analyst roles", "who’s hiring for marketing"). Card grid with real listings; not for generic career advice with no search intent.
 
-**Critical:** Only one intent per turn. Prefer the **latest user message**: if they clearly mean food, use a food intent; if they clearly mean training/movement, use an exercise intent. "Recipe for X" → **full_recipe**. "How do I do X" (exercise) → **full_exercise**. "Show me a GIF/image of this exercise" (one movement) → **full_exercise**. "Show me GIFs for all of those" (several already listed) → **chat_only** with a brief reply.
+7) **chat_only** — Motivation, planning, generic tips without needing recipe/nutrition/exercise/**job listing** API data.
+
+**Critical:** Only one intent per turn. Prefer the **latest user message**: if they clearly mean food, use a food intent; if they clearly mean training/movement, use an exercise intent; if they clearly mean **job search / listings**, use **suggest_jobs** when they want to see openings. "Recipe for X" → **full_recipe**. "How do I do X" (exercise) → **full_exercise**. "Show me a GIF/image of this exercise" (one movement) → **full_exercise**. "Show me GIFs for all of those" (several already listed) → **chat_only** with a brief reply.
 
 Reply rules:
 - **full_recipe**: 1–2 short sentences; the app will show ingredients and steps below. Do not invent ingredients.
@@ -93,6 +99,7 @@ Reply rules:
 - **suggest_recipes**: one short intro; recipe cards below.
 - **full_exercise**: 1–2 short sentences; app will show instructions below. Do not invent steps.
 - **suggest_exercises**: one short intro; exercise cards below.
+- **suggest_jobs**: one short intro; job listing cards below. Do not invent employers or URLs.
 - **chat_only**: complete answer in "reply".`;
 
 function buildPlannerUserPayload(params: {
@@ -103,6 +110,7 @@ function buildPlannerUserPayload(params: {
   questDescription: string;
   recentRecipes: { id: number; title: string }[];
   recentExercises: { id: string; name: string }[];
+  recentJobs: { id: string; title: string; employerName: string }[];
   history: QuestAssistHistoryEntry[];
   latestUserMessage: string;
 }): string {
@@ -129,7 +137,11 @@ function buildPlannerUserPayload(params: {
         h.fullExerciseId.trim().length > 0
           ? ` [full exercise id: ${h.fullExerciseId.trim()}]`
           : '';
-      return `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.text.trim()}${ids}${fullId}${exIds}${fullEx}`;
+      const jobIds =
+        h.role === 'assistant' && h.jobIds && h.jobIds.length > 0
+          ? ` [job card ids: ${h.jobIds.join(', ')}]`
+          : '';
+      return `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.text.trim()}${ids}${fullId}${exIds}${fullEx}${jobIds}`;
     })
     .join('\n');
 
@@ -146,6 +158,9 @@ function buildPlannerUserPayload(params: {
     '',
     '## Exercises already shown in this chat (id → name). Use ids for full_exercise when the user refers to them.',
     JSON.stringify(params.recentExercises),
+    '',
+    '## Jobs already shown in this chat (id → title @ employer).',
+    JSON.stringify(params.recentJobs),
     '',
     '## Conversation so far',
     prior.length > 0 ? prior : '(no prior messages)',
@@ -174,7 +189,8 @@ function parseQuestAssistPlan(content: string): QuestAssistPlan | null {
     intent !== 'nutrition_for_recipe' &&
     intent !== 'full_recipe' &&
     intent !== 'suggest_exercises' &&
-    intent !== 'full_exercise'
+    intent !== 'full_exercise' &&
+    intent !== 'suggest_jobs'
   ) {
     return null;
   }
@@ -246,6 +262,12 @@ export function fallbackExerciseAssistIntro(hasExercises: boolean): string {
     : 'Here is a quick thought for your quest—tell me if you want movement ideas or details.';
 }
 
+export function fallbackJobAssistIntro(hasJobs: boolean): string {
+  return hasJobs
+    ? 'Here are some openings that match your search.'
+    : 'Tell me the role, skills, or location you want and I can pull listings.';
+}
+
 function heuristicPlan(params: {
   goalTitle: string;
   goalDescription: string;
@@ -254,7 +276,10 @@ function heuristicPlan(params: {
   latestUserMessage: string;
   recentRecipes: { id: number; title: string }[];
   recentExercises: { id: string; name: string }[];
+  /** Listed for planner payload parity; heuristics use jobContext from the latest message. */
+  recentJobs: { id: string; title: string; employerName: string }[];
 }): QuestAssistPlan {
+  void params.recentJobs;
   const u = params.latestUserMessage.toLowerCase();
   const recent = params.recentRecipes;
   const lastId = recent.length > 0 ? recent[recent.length - 1]!.id : null;
@@ -278,12 +303,33 @@ function heuristicPlan(params: {
     userMessage: params.latestUserMessage,
   });
 
+  const jobContext = isQuestAssistJobRelated({
+    goalTitle: params.goalTitle,
+    goalDescription: params.goalDescription,
+    questTitle: params.questTitle,
+    questDescription: params.questDescription,
+    userMessage: params.latestUserMessage,
+  });
+
   const foodLean =
     /\b(cook|eat|meal|recipe|food|dinner|lunch|breakfast|snack|ingredients)\b/.test(u);
   const exerciseLean =
     /\b(workout|exercise|exercises|lift|lifting|squat|deadlift|pushup|push-up|pullup|pull-up|rep|reps|set|sets|gym|run|cardio|muscle|stretch|mobility|legs|chest|back|core|arms)\b/.test(
       u,
     );
+
+  const jobLean =
+    /\b(job|jobs|career|careers|hiring|resume|cv|interview|recruiter|linkedin|role|roles|position|positions|opening|openings|apply|salary|offer)\b/.test(
+      u,
+    );
+
+  const wantsNewJobs =
+    /\b(find|search|look\s+for|show\s+me)\s+(?:me\s+)?(?:some\s+)?(?:jobs?|openings?|roles?|positions?|listings?)\b/.test(
+      u,
+    ) ||
+    /\b(job\s+search|who(?:'s|s)\s+hiring|hiring\s+now|postings?|job\s+board)\b/.test(u) ||
+    /\b(more\s+jobs?|other\s+jobs?|any\s+jobs?)\b/.test(u) ||
+    (jobContext && /\b(any|some)\s+ideas\b/.test(u) && jobLean && !foodLean);
 
   const wantsNutrition =
     /\b(nutrit|nutrition|nutrients|calorie|calories|kcal|macro|macros|protein|carbs|carbohydrate|fat\b|vitamin|mineral|sodium|fiber|sugar)\b/.test(
@@ -431,9 +477,38 @@ function heuristicPlan(params: {
         ...emptyHints(),
       };
     }
+    if (foodContext && jobContext && wantsNewJobs && jobLean && !foodLean) {
+      return {
+        intent: 'suggest_jobs',
+        reply: fallbackJobAssistIntro(true),
+        ...emptyHints(),
+      };
+    }
     return {
       intent: 'suggest_recipes',
       reply: fallbackQuestAssistIntro(true),
+      ...emptyHints(),
+    };
+  }
+
+  if (wantsNewJobs && jobContext) {
+    if (jobContext && exerciseContext && wantsNewExercises && exerciseLean && !jobLean) {
+      return {
+        intent: 'suggest_exercises',
+        reply: fallbackExerciseAssistIntro(true),
+        ...emptyHints(),
+      };
+    }
+    if (jobContext && foodContext && wantsNewRecipes && foodLean && !jobLean) {
+      return {
+        intent: 'suggest_recipes',
+        reply: fallbackQuestAssistIntro(true),
+        ...emptyHints(),
+      };
+    }
+    return {
+      intent: 'suggest_jobs',
+      reply: fallbackJobAssistIntro(true),
       ...emptyHints(),
     };
   }
@@ -471,6 +546,7 @@ export async function planQuestAssistTurn(params: {
   questDescription: string;
   recentRecipes: { id: number; title: string }[];
   recentExercises: { id: string; name: string }[];
+  recentJobs: { id: string; title: string; employerName: string }[];
   history: QuestAssistHistoryEntry[];
   latestUserMessage: string;
 }): Promise<QuestAssistPlan> {
@@ -484,6 +560,7 @@ export async function planQuestAssistTurn(params: {
       latestUserMessage: params.latestUserMessage,
       recentRecipes: params.recentRecipes,
       recentExercises: params.recentExercises,
+      recentJobs: params.recentJobs,
     });
   }
 
@@ -517,6 +594,7 @@ export async function planQuestAssistTurn(params: {
       latestUserMessage: params.latestUserMessage,
       recentRecipes: params.recentRecipes,
       recentExercises: params.recentExercises,
+      recentJobs: params.recentJobs,
     });
   }
 
@@ -530,6 +608,7 @@ export async function planQuestAssistTurn(params: {
       latestUserMessage: params.latestUserMessage,
       recentRecipes: params.recentRecipes,
       recentExercises: params.recentExercises,
+      recentJobs: params.recentJobs,
     });
   }
 
@@ -543,6 +622,7 @@ export async function planQuestAssistTurn(params: {
       latestUserMessage: params.latestUserMessage,
       recentRecipes: params.recentRecipes,
       recentExercises: params.recentExercises,
+      recentJobs: params.recentJobs,
     });
   }
   const content = (choices[0] as { message?: { content?: string } })?.message?.content;
@@ -555,6 +635,7 @@ export async function planQuestAssistTurn(params: {
       latestUserMessage: params.latestUserMessage,
       recentRecipes: params.recentRecipes,
       recentExercises: params.recentExercises,
+      recentJobs: params.recentJobs,
     });
   }
 
@@ -568,6 +649,7 @@ export async function planQuestAssistTurn(params: {
       latestUserMessage: params.latestUserMessage,
       recentRecipes: params.recentRecipes,
       recentExercises: params.recentExercises,
+      recentJobs: params.recentJobs,
     });
   }
   return parsed;
