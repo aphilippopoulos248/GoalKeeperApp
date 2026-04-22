@@ -6,14 +6,21 @@ import {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { useEffect } from 'react';
+
 import { ActiveGoalsProvider } from './src/context/ActiveGoalsContext';
 import { AuthUserProvider } from './src/context/AuthUserContext';
 import { QuestProgressProvider } from './src/context/QuestProgressContext';
+import { initProgressReflectionNotificationHandler } from './src/lib/progressReflectionNotifications';
 import { RootStack } from './src/navigation/RootStack';
 import { ThemeProvider, useAppTheme } from './src/theme/ThemeProvider';
 
 function AppNavigation() {
   const { colors, mode } = useAppTheme();
+
+  useEffect(() => {
+    initProgressReflectionNotificationHandler();
+  }, []);
 
   const navTheme: Theme = {
     dark: mode === 'dark',

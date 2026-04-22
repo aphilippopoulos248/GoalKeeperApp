@@ -64,6 +64,8 @@ export type RegenerateDailyQuestsParams = GoalPlannerBaseParams & {
    * Omit or use [] for first-time backfill.
    */
   previousDailyQuests?: Array<{ title: string; description: string }>;
+  /** User journaling / progress notes; trimmed and length-capped server-side. */
+  userProgressJournal?: string;
 };
 
 export type GoalPlannerErrorCode =
@@ -426,6 +428,22 @@ const DAILY_QUEST_RUNWAY_REALISM_RULES = `Timeframe and realism (user message in
 - Use **todayIso** vs **targetDateIso**: if the deadline is **soon**, prefer **smaller, verifiable** steps that still match the goal; if the deadline is **far**, still keep each quest a **modest single-day** action—do not assign future-level work in one day.
 - Increase load **gradually** (a few more minutes, reps, pages, or one extra social step)—not jumps that assume weeks of unstated training.`;
 
+/** Max characters sent in user JSON for userProgressJournal (token control). */
+export const USER_PROGRESS_JOURNAL_MAX_CHARS = 8000;
+
+function capUserProgressJournal(s: string | undefined): string | null {
+  if (typeof s !== 'string' || !s.trim()) return null;
+  const t = s.trim();
+  if (t.length <= USER_PROGRESS_JOURNAL_MAX_CHARS) return t;
+  return `${t.slice(0, USER_PROGRESS_JOURNAL_MAX_CHARS)}…`;
+}
+
+const DAILY_QUEST_USER_JOURNAL_RULES = `User-reported progress (applies when the user JSON field "userProgressJournal" is a non-empty string):
+- Treat it as first-class context: the user described what they achieved, learned, or found recently. Use **concrete names** they gave (event titles, people, books, places, products, skills).
+- Propose a **sensible next small step in the same thread** (e.g. if they found a specific social event, a quest can be to book or register for **that named event**; if they sketched a next milestone, reflect it in a one-day action).
+- The journal may include unrelated life detail: prioritize what fits this goal’s title and description; ignore what does not.
+- You must still obey all other system rules: one-day scale, no verbatim milestone text, reservedScheduleSlots, Outcome proximity, and replace-mode anti-repetition when applicable.`;
+
 const REGEN_ANTI_REPETITION_RULES = `Replace mode (applies when user JSON has "replacePreviousQuests": true and a non-empty "previousDailyQuests" array):
 - That array lists the **old** daily quests being **fully replaced**. You must output a **new** set of quests, not a light revision.
 - New titles and descriptions must be **substantively different** from every previous title and every previous description: use **different** core verbs, nouns, objects, and *kinds* of action (e.g. if the old set was all "read N pages", switch to a mix: select material, time-boxed session, note one takeaway, audio, new location, etc.—whatever fits the goal but **not** the same three beats).
@@ -547,6 +565,8 @@ ${DAILY_QUEST_PROXIMITY_RULES}
 ${DAILY_QUEST_RUNWAY_REALISM_RULES}
 
 ${REGEN_ANTI_REPETITION_RULES}
+
+${DAILY_QUEST_USER_JOURNAL_RULES}
 
 Rules:
 - The user JSON includes "goalType" (linear / biological / skill_based / outcome_based). ${goalTypeDailyQuestGuidance(goalType)}
@@ -1197,6 +1217,7 @@ export async function regenerateDailyQuests(
       description: (q.description ?? '').trim(),
     }));
   const replacePreviousQuests = previousDailyQuests.length > 0;
+  const userProgressJournal = capUserProgressJournal(params.userProgressJournal);
   const user = JSON.stringify({
     title: params.title,
     description: params.description,
@@ -1212,6 +1233,7 @@ export async function regenerateDailyQuests(
     reservedScheduleSlots: params.reservedScheduleSlots ?? [],
     previousDailyQuests: replacePreviousQuests ? previousDailyQuests : [],
     replacePreviousQuests,
+    userProgressJournal: userProgressJournal ?? null,
     /** Unique per request so the model treats each refresh as a new generation, not a tweak of the last. */
     regenerationRequestId: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
   });

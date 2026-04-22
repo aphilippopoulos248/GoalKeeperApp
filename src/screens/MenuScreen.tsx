@@ -11,6 +11,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -57,9 +58,11 @@ export function MenuScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
   const route = useRoute<RouteProp<RootTabParamList, 'Menu'>>();
   const listRef = useRef<FlatList<DailyQuestEntry>>(null);
-  const { goals, refreshAllDailyQuestsForDebug } = useActiveGoals();
+  const { goals, refreshAllDailyQuestsForDebug, submitProgressJournal } = useActiveGoals();
   const [sortMode, setSortMode] = useState<DailyQuestSortMode>('recommended');
   const [debugRefreshingQuests, setDebugRefreshingQuests] = useState(false);
+  const [debugJournalText, setDebugJournalText] = useState('');
+  const [debugJournalSaving, setDebugJournalSaving] = useState(false);
   const {
     completed,
     toggleQuest,
@@ -193,6 +196,30 @@ export function MenuScreen() {
     })();
   }, [activeGoals.length, refreshAllDailyQuestsForDebug]);
 
+  const onDebugSaveJournal = useCallback(() => {
+    const trimmed = debugJournalText.trim();
+    if (!trimmed) {
+      Alert.alert('Debug journal', 'Enter some text to share with the AI.', [{ text: 'OK' }]);
+      return;
+    }
+    void (async () => {
+      setDebugJournalSaving(true);
+      try {
+        const res = await submitProgressJournal(trimmed, 'debug_menu');
+        if (!res.ok) {
+          Alert.alert('Debug journal', res.error ?? 'Save failed.', [{ text: 'OK' }]);
+          return;
+        }
+        setDebugJournalText('');
+        Alert.alert('Debug journal', 'Saved. Daily quests were updated in place where possible.', [
+          { text: 'OK' },
+        ]);
+      } finally {
+        setDebugJournalSaving(false);
+      }
+    })();
+  }, [debugJournalText, submitProgressJournal]);
+
   const listFooter = useMemo(
     () => (
       <View style={styles.debugFooter}>
@@ -224,15 +251,66 @@ export function MenuScreen() {
         <Text style={[styles.debugHint, { color: colors.textSecondary }]}>
           Regenerates copy for every active goal (dev only; resets checkmarks).
         </Text>
+        <Text
+          style={[styles.debugSectionLabel, { color: colors.text }]}
+        >
+          Share progress with AI (debug)
+        </Text>
+        <TextInput
+          value={debugJournalText}
+          onChangeText={setDebugJournalText}
+          placeholder="e.g. I found a social event called &quot;Board game night&quot; and want to go."
+          placeholderTextColor={colors.textSecondary}
+          multiline
+          textAlignVertical="top"
+          editable={!debugJournalSaving}
+          style={[
+            styles.debugJournalInput,
+            {
+              color: colors.text,
+              borderColor: colors.border,
+              backgroundColor: colors.surfaceElevated,
+            },
+          ]}
+        />
+        <Pressable
+          accessibilityLabel="Debug: save journal for next quest generation"
+          disabled={debugJournalSaving}
+          onPress={onDebugSaveJournal}
+          style={({ pressed }) => [
+            styles.debugButton,
+            {
+              backgroundColor: colors.surfaceElevated,
+              borderColor: colors.border,
+              marginTop: 4,
+              opacity: debugJournalSaving ? 0.5 : pressed ? 0.88 : 1,
+            },
+          ]}
+        >
+          {debugJournalSaving ? (
+            <ActivityIndicator color={colors.textSecondary} size="small" />
+          ) : null}
+          <Text style={[styles.debugButtonText, { color: colors.textSecondary }]}>
+            Save for next quest refresh
+          </Text>
+        </Pressable>
+        <Text style={[styles.debugHint, { color: colors.textSecondary }]}>
+          Saves to your journal and regenerates dailies in place (keeps checkmarks) when you have
+          a full set per goal.
+        </Text>
       </View>
     ),
     [
       activeGoals.length,
       colors.border,
       colors.surfaceElevated,
+      colors.text,
       colors.textSecondary,
+      debugJournalSaving,
+      debugJournalText,
       debugRefreshingQuests,
       onDebugRefreshQuests,
+      onDebugSaveJournal,
     ],
   );
 
@@ -449,5 +527,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     textAlign: 'center',
+  },
+  debugSectionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: spacing.lg,
+    marginBottom: spacing.xs,
+  },
+  debugJournalInput: {
+    minHeight: 100,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    fontSize: 15,
   },
 });

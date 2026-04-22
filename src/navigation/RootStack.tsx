@@ -7,12 +7,28 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Platform, View } from 'react-native';
+import * as Notifications from 'expo-notifications';
 
+import { DailyReflectionOverlay } from '../components/DailyReflectionOverlay';
 import { PostLoginGreetingOverlay } from '../components/PostLoginGreetingOverlay';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
+import { useAuthUser } from '../context/AuthUserContext';
+import {
+  getReflectionDismissedDate,
+  setReflectionDismissedForToday,
+} from '../lib/dailyReflectionIntent';
+import {
+  ensureDailyReflectionNotificationScheduled,
+  shouldOpenReflectionFromLastNotificationResponse,
+} from '../lib/progressReflectionNotifications';
+import {
+  formatLocalDateYyyyMmDd,
+  hasProgressJournalOnDate,
+} from '../services/supabase/progressJournalRepository';
 import { buildGreetingMessage } from '../lib/buildGreetingMessage';
 import {
   consumeGreetingIntent,
@@ -48,7 +64,10 @@ function MainShell() {
   if (!ctx) {
     throw new Error('MainShell requires PostLoginGreetingContext');
   }
-  const { goals, goalsStorageReady } = useActiveGoals();
+  const { goals, goalsStorageReady, submitProgressJournal } = useActiveGoals();
+  const { userId, authReady } = useAuthUser();
+  const [showReflection, setShowReflection] = useState(false);
+  const launchNotifAutoOpenHandledRef = useRef(false);
 
   const preparing = ctx.showGreeting && !goalsStorageReady;
   const message = useMemo(() => {
@@ -66,6 +85,68 @@ function MainShell() {
     goalsStorageReady,
   ]);
 
+  useEffect(() => {
+    if (!authReady || !userId || !goalsStorageReady) return;
+    void ensureDailyReflectionNotificationScheduled();
+  }, [authReady, userId, goalsStorageReady]);
+
+  useEffect(() => {
+    if (!authReady || !userId || !goalsStorageReady) return;
+    if (ctx.showGreeting) return;
+    if (Platform.OS === 'web') return;
+    let cancelled = false;
+    void (async () => {
+      const fromNotif = await shouldOpenReflectionFromLastNotificationResponse();
+      if (cancelled) return;
+      if (fromNotif && !launchNotifAutoOpenHandledRef.current) {
+        launchNotifAutoOpenHandledRef.current = true;
+        setShowReflection(true);
+        return;
+      }
+      const today = formatLocalDateYyyyMmDd();
+      const dismissed = await getReflectionDismissedDate();
+      if (dismissed === today) return;
+      const has = await hasProgressJournalOnDate(userId, today);
+      if (has) return;
+      if (new Date().getHours() < 17) return;
+      setShowReflection(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, userId, goalsStorageReady, ctx.showGreeting]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as { type?: string } | undefined;
+      if (data?.type === 'DAILY_REFLECTION') {
+        setShowReflection(true);
+      }
+    });
+    return () => {
+      sub.remove();
+    };
+  }, []);
+
+  const onReflectionNotNow = useCallback(async () => {
+    await setReflectionDismissedForToday(formatLocalDateYyyyMmDd());
+  }, []);
+
+  const onReflectionAfterClose = useCallback(() => {
+    setShowReflection(false);
+  }, []);
+
+  const onReflectionSubmit = useCallback(
+    async (body: string) => {
+      return submitProgressJournal(body, 'reflection');
+    },
+    [submitProgressJournal],
+  );
+
+  const reflectionVisible =
+    showReflection && !ctx.showGreeting && goalsStorageReady;
+
   return (
     <View style={{ flex: 1 }}>
       <RootTabs />
@@ -74,6 +155,12 @@ function MainShell() {
         preparing={preparing}
         message={message}
         onFinished={ctx.onGreetingFinished}
+      />
+      <DailyReflectionOverlay
+        visible={reflectionVisible}
+        onNotNow={onReflectionNotNow}
+        onAfterClose={onReflectionAfterClose}
+        onSubmit={onReflectionSubmit}
       />
     </View>
   );

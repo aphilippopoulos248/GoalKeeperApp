@@ -11,6 +11,12 @@ import React, {
 import { SEED_ACTIVE_GOALS } from '../data/mockGoal';
 import { fetchGoalsForUser, syncGoalsForUser } from '../services/supabase/goalsRepository';
 import { fetchLifeScheduleSlots, replaceLifeScheduleSlots } from '../services/supabase/lifeScheduleRepository';
+import {
+  fetchRecentProgressJournal,
+  formatJournalRowsForAi,
+  insertProgressJournalEntry,
+  type JournalEntrySource,
+} from '../services/supabase/progressJournalRepository';
 import { migrateLegacyLocalData } from '../services/supabase/legacyMigration';
 import {
   GoalPlannerError,
@@ -67,6 +73,14 @@ type ActiveGoalsContextValue = {
   clearLifeScheduleConstraints: () => Promise<void>;
   /** Regenerate every active goal’s daily quests (debug; new quest IDs, completions reset). */
   refreshAllDailyQuestsForDebug: () => Promise<void>;
+  /**
+   * Save a progress journal entry and refresh daily quest copy in place (keeps quest ids / completions).
+   * Requires sign-in. Ignores goals that do not yet have a full daily set (backfill handles those).
+   */
+  submitProgressJournal: (
+    body: string,
+    source: JournalEntrySource,
+  ) => Promise<{ ok: boolean; error?: string }>;
 };
 
 const ActiveGoalsContext = createContext<ActiveGoalsContextValue | null>(null);
@@ -86,6 +100,44 @@ function mergeDailyQuestSchedule(
     if (!p || q.kind !== 'daily') return q;
     return {
       ...q,
+      dayOrder: p.dayOrder,
+      scheduleStartMinute: p.startMinute,
+      scheduleDurationMinutes: p.durationMinutes,
+    };
+  });
+}
+
+function dayOrderValue(q: Quest): number {
+  return typeof q.dayOrder === 'number' && Number.isFinite(q.dayOrder) ? q.dayOrder : 500;
+}
+
+function sortDailiesByDayOrder(dailies: Quest[]): Quest[] {
+  return [...dailies].sort((a, b) => {
+    const d = dayOrderValue(a) - dayOrderValue(b);
+    if (d !== 0) return d;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+/** Replaces title/body/schedule for existing daily quest ids; keeps ids stable. */
+function applyPlannedDailiesPreservingIds(
+  fullQuests: Quest[],
+  sortedDailies: Quest[],
+  planned: PlannerDailyQuest[],
+): Quest[] {
+  if (sortedDailies.length !== planned.length) return fullQuests;
+  const byId = new Map<string, PlannerDailyQuest>();
+  sortedDailies.forEach((q, i) => {
+    byId.set(q.id, planned[i]!);
+  });
+  return fullQuests.map((q) => {
+    const p = byId.get(q.id);
+    if (!p || q.kind !== 'daily') return q;
+    return {
+      ...q,
+      title: p.title,
+      description: p.description,
+      points: p.points,
       dayOrder: p.dayOrder,
       scheduleStartMinute: p.startMinute,
       scheduleDurationMinutes: p.durationMinutes,
@@ -190,6 +242,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
   const goalsRef = useRef<Goal[]>(goals);
   const lifeScheduleSlotsRef = useRef<ReservedScheduleSlot[]>([]);
   const dailyQuestBackfillInFlight = useRef(new Set<string>());
+  const journalContextForAiRef = useRef<string>('');
 
   useEffect(() => {
     goalsRef.current = goals;
@@ -202,6 +255,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     if (!authReady) return;
     if (userId === null) {
+      journalContextForAiRef.current = '';
       setGoals([...SEED_ACTIVE_GOALS]);
       setLifeScheduleSlots([]);
       lifeScheduleSlotsRef.current = [];
@@ -215,11 +269,13 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     void (async () => {
       await migrateLegacyLocalData(userId);
       if (cancelled) return;
-      const [loadedGoals, slots] = await Promise.all([
+      const [loadedGoals, slots, journalRows] = await Promise.all([
         fetchGoalsForUser(userId),
         fetchLifeScheduleSlots(userId),
+        fetchRecentProgressJournal(userId),
       ]);
       if (cancelled) return;
+      journalContextForAiRef.current = formatJournalRowsForAi(journalRows);
       setGoals(loadedGoals);
       setLifeScheduleSlots(slots);
       lifeScheduleSlotsRef.current = slots;
@@ -285,6 +341,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
             previousDailyQuests: (snapshot.dailyQuests ?? [])
               .filter((q) => q.kind === 'daily')
               .map((q) => ({ title: q.title, description: q.description })),
+            userProgressJournal: journalContextForAiRef.current.trim() || undefined,
           });
           const regenBatch = Date.now();
           setGoals((cur) =>
@@ -463,6 +520,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
           previousDailyQuests: (goal.dailyQuests ?? [])
             .filter((q) => q.kind === 'daily')
             .map((q) => ({ title: q.title, description: q.description })),
+          userProgressJournal: journalContextForAiRef.current.trim() || undefined,
         });
         const regenBatch = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         const newDailies: Quest[] = dailyQuestsRaw.map((q, i) => ({
@@ -490,6 +548,85 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       throw new Error(errors.join('\n'));
     }
   }, [storageReady]);
+
+  const refreshDailyQuestsWithJournalContext = useCallback(async () => {
+    if (!storageReady) return;
+    const todayIso = new Date().toISOString();
+    const journal = journalContextForAiRef.current.trim() || undefined;
+    let working: Goal[] = goalsRef.current.map((g) => ({
+      ...g,
+      dailyQuests: g.dailyQuests?.map((q) => ({ ...q })),
+    }));
+    for (const goal of working) {
+      if (goal.completed) continue;
+      const questCount = dailyQuestCountForPriority(parseGoalPriority(goal.priority));
+      const dailies = (goal.dailyQuests ?? []).filter((q) => q.kind === 'daily');
+      if (dailies.length < questCount) continue;
+      const sortedDailies = sortDailiesByDayOrder(dailies);
+      if (sortedDailies.length !== questCount) continue;
+      try {
+        const dailyQuestsRaw = await regenerateDailyQuests({
+          title: goal.title,
+          description: goal.description,
+          targetDateIso: effectiveTargetDateIso(goal),
+          todayIso,
+          completedCheckpointCount: goal.checkpoints.filter((c) => c.done).length,
+          checkpointTitles: goal.checkpoints.map((c) => c.title),
+          upcomingCheckpointTitles: goal.checkpoints
+            .filter((c) => !c.done)
+            .map((c) => c.title),
+          totalCheckpointCount: goal.checkpoints.length,
+          dailyQuestCount: questCount,
+          milestoneFrequency: parseMilestoneFrequency(goal.milestoneFrequency),
+          goalType: parseGoalType(goal.goalType),
+          reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
+            lifeScheduleSlotsRef.current,
+            working,
+            goal.id,
+          ),
+          previousDailyQuests: sortedDailies.map((q) => ({
+            title: q.title,
+            description: q.description,
+          })),
+          userProgressJournal: journal,
+        });
+        if (dailyQuestsRaw.length !== questCount) continue;
+        const newDailies = applyPlannedDailiesPreservingIds(
+          goal.dailyQuests!,
+          sortedDailies,
+          dailyQuestsRaw,
+        );
+        working = working.map((g) =>
+          g.id === goal.id ? { ...g, dailyQuests: newDailies } : g,
+        );
+      } catch (e) {
+        console.error('[refreshDailyQuestsWithJournalContext]', goal.id, e);
+      }
+    }
+    setGoals(working);
+    goalsRef.current = working;
+  }, [storageReady]);
+
+  const submitProgressJournal = useCallback(
+    async (body: string, source: JournalEntrySource) => {
+      const trimmed = body.trim();
+      if (!trimmed) {
+        return { ok: false as const, error: 'Entry is empty.' };
+      }
+      if (userId === null) {
+        return { ok: false as const, error: 'Sign in to save progress notes for the AI.' };
+      }
+      const row = await insertProgressJournalEntry({ userId, body: trimmed, source });
+      if (!row) {
+        return { ok: false as const, error: 'Could not save your entry.' };
+      }
+      const rows = await fetchRecentProgressJournal(userId);
+      journalContextForAiRef.current = formatJournalRowsForAi(rows);
+      await refreshDailyQuestsWithJournalContext();
+      return { ok: true as const };
+    },
+    [userId, refreshDailyQuestsWithJournalContext],
+  );
 
   const toggleCheckpoint = useCallback((goalId: string, checkpointId: string) => {
     setGoals((prev) => {
@@ -533,6 +670,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       applyLifeScheduleMessage,
       clearLifeScheduleConstraints,
       refreshAllDailyQuestsForDebug,
+      submitProgressJournal,
     }),
     [
       goals,
@@ -546,6 +684,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       applyLifeScheduleMessage,
       clearLifeScheduleConstraints,
       refreshAllDailyQuestsForDebug,
+      submitProgressJournal,
     ],
   );
 
