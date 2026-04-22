@@ -340,6 +340,22 @@ function checkpointSpacingInstruction(freq: MilestoneFrequency): string {
   }
 }
 
+/**
+ * Shared by buildFullSystem and buildRegenSystem: concreteness, milestone difficulty, title vs body.
+ * Keep in sync when editing either path.
+ */
+const DAILY_QUEST_COPY_AND_TIER_RULES = `Daily quest text (critical):
+- The user message includes "completedCheckpointCount" (number of milestones already completed) and a goal "title" and "description". Use them.
+- **Title vs description (must differ):** Each item MUST have a separate "title" and "description".
+  - "title": at most **5 words**; short imperative (e.g. "Choose one book", "Run five kilometers"). No period at the end.
+  - "description": 1–3 sentences that **add** information the title does not cover: time window, how much (count, pages, minutes, reps, distance), where, or what "done" looks like. **Do not** copy the title, paste the same sentence, or use a near-paraphrase of the title. The description is the detail; the title is the hook.
+- **Zero baseline (completedCheckpointCount is 0):** Assume the user has **not** already built the habit and may lack prior skill. No prerequisite skills—quests must be things a total beginner can do today. **Order** the dailyQuests array as a small ramp: first item = **shortest / easiest setup** (2–5 min, e.g. pick the book, find a 10-minute video, lay out shoes); later items in the list = **slightly** more (still easy: e.g. read 5 pages, then 10 pages; mirror talk for 1 minute). Forbid vague stems ("improve…", "work on…", "get better at…") unless the same line names a **concrete** action, object, and/or number.
+- **Milestone difficulty ladder (use completedCheckpointCount):**
+  - 0: micro/foundation, minimal friction, obvious first steps only.
+  - 1: light, repeatable practice—still not "milestone level."
+  - 2+: noticeably harder day-sized actions (time, volume, or intensity) than at 0—still **safer and smaller** than a full checkpoint/milestone; never replace a milestone.
+- **Examples (flavor only; match the user's goal):** "Read more" with 0 milestones: choose a book → read 5 pages → read 10 pages. "Socialize more" with 0: watch one specific short video on conversation skills → practice talking aloud in a mirror for 1 minute. "Get fit" with 2+ milestones: 20 push-ups in one set, run 5 km outside, etc.`;
+
 function buildFullSystem(
   dailyQuestCount: number,
   milestoneFrequency: MilestoneFrequency,
@@ -361,10 +377,11 @@ Milestones vs daily quests (critical):
 - Daily quests are **smaller, repeatable, preparatory steps** (practice, reflection, learning, low-stakes rehearsals) that **build toward** those milestones. They must **not** copy the same wording as a milestone; they prepare the user for the bigger step later.
 - Each milestone label must be a **single clear, verifiable challenge** for that period; avoid vague labels like “keep going”.
 
+${DAILY_QUEST_COPY_AND_TIER_RULES}
+
 Rules:
 - Use the user's title and description; make SMART fields concrete.
-- If completedCheckpointCount is 0, daily quests must be VERY EASY (5–15 min, low friction).
-- If completedCheckpointCount is higher, increase difficulty and points modestly (still safe and actionable).
+- If completedCheckpointCount is 0, daily quests must be VERY EASY (5–15 min, low friction), following the zero-baseline and ramp rules above. If higher, increase difficulty and points modestly (still safe and actionable) per the ladder above.
 - Checkpoints must align with the goal, deadline, and milestoneFrequency from the user message.
 - dailyQuests must be specific to this goal’s title and description (not generic self-help).
 - Each dailyQuest "points" MUST be exactly one of 10, 15, 20, or 25 (use different values across quests when possible).
@@ -383,12 +400,13 @@ function buildRegenSystem(dailyQuestCount: number): string {
   return `You are a goal-planning coach. Reply with a single JSON object only: { "dailyQuests": [ ... ] }.
 dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder", "startMinute", "durationMinutes" } with points exactly 10, 15, 20, or 25 only (vary across quests), dayOrder 0–999, startMinute 0–1439, durationMinutes 15–120. Blocks must not overlap within the array; prefer 06:00–22:00. If the user JSON includes reservedScheduleSlots, treat each entry as a busy half-open interval [startMinute, endMinute)—your quests must not overlap those (one quest at a time globally).
 
+${DAILY_QUEST_COPY_AND_TIER_RULES}
+
 Rules:
-- The user JSON includes "checkpointTitles": the existing milestone names for this goal. Daily quests must be **smaller preparatory steps** (practice, study, low-stakes drills) that **support** those milestones—**not** duplicate them. Daily quests should feel **easier** than completing a milestone; milestones stay the **bold stretch** challenges.
+- The user JSON includes "checkpointTitles": the existing milestone names for this goal. Daily quests must be **smaller preparatory steps** (practice, study, low-stakes drills) that **support** those milestones—**not** duplicate them. Daily quests should feel **easier** than completing a milestone; milestones stay the **bold stretch** challenges. Use "completedCheckpointCount" and "checkpointTitles" to match difficulty and the **next** not-yet-done milestones to the dailies you write.
 - The user message includes milestoneFrequency (weekly / biweekly / monthly). Align daily quest pacing and tone with that cadence (e.g. smaller daily steps when milestones are weekly vs monthly).
 - Quests must support the user's goal and build skills toward the **next** milestones the user has not yet reached.
-- If completedCheckpointCount is 0, quests are VERY EASY.
-- Higher completedCheckpointCount means noticeably harder (longer or more demanding) daily actions, still realistic—and still **below** the bar of a full milestone challenge.
+- If completedCheckpointCount is 0, quests are VERY EASY, following the zero-baseline and ramp rules above. Higher counts follow the difficulty ladder above—still **below** the bar of a full milestone challenge.
 - Each quest must be specific to this goal’s title and description (not generic advice).
 - Each quest MUST include dayOrder 0–999; the Menu sorts all goals’ quests ascending (morning first, evening last).
 - Each quest MUST include startMinute and durationMinutes (non-overlapping within the batch; align start times with dayOrder).
@@ -575,6 +593,50 @@ function pickOptionalDurationMinutes(record: Record<string, unknown>): number | 
   return undefined;
 }
 
+/** Shown when the model only returned a title (never duplicate title as body). */
+const QUEST_DESC_FALLBACK_WHEN_NO_BODY =
+  'Pick a 10–15 minute window and one clear "done" signal (timer, count, or a specific outcome) before you start.';
+
+const QUEST_DESC_FALLBACK_WHEN_DUPLICATE =
+  'Set a time window and a clear finishing line (timer, count, or one concrete outcome) before you start.';
+
+function clampTitleToFiveWords(title: string): string {
+  const t = title.trim();
+  if (!t) return t;
+  const words = t.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length <= 5) return t;
+  return `${words.slice(0, 5).join(' ')}…`;
+}
+
+/**
+ * Titles are at most 5 words; descriptions must not duplicate the title. If the model
+ * merged action + detail in one string, split on em-dash or colon when helpful.
+ */
+function finalizeQuestTitleDescription(
+  title: string,
+  description: string,
+): { title: string; description: string } {
+  let t = clampTitleToFiveWords(title.trim());
+  let d = description.trim();
+  if (!d) {
+    return { title: t, description: QUEST_DESC_FALLBACK_WHEN_NO_BODY };
+  }
+  if (normalizeTitleKey(t) === normalizeTitleKey(d)) {
+    const parts = d.split(/[—:–-]/, 2);
+    if (parts.length === 2) {
+      const a = parts[0].trim();
+      const b = parts[1].trim();
+      if (a && b && normalizeTitleKey(a) !== normalizeTitleKey(b)) {
+        t = clampTitleToFiveWords(a);
+        d = b;
+        return { title: t, description: d };
+      }
+    }
+    d = QUEST_DESC_FALLBACK_WHEN_DUPLICATE;
+  }
+  return { title: t, description: d };
+}
+
 function pairTitleDescription(
   title: string | undefined,
   description: string | undefined,
@@ -588,7 +650,7 @@ function pairTitleDescription(
     };
   }
   if (title && !description) {
-    return { title, description: title };
+    return { title, description: QUEST_DESC_FALLBACK_WHEN_NO_BODY };
   }
   return undefined;
 }
@@ -657,8 +719,9 @@ function parseFullResult(
     if (!paired) {
       continue;
     }
-    title = paired.title;
-    description = paired.description;
+    const finalized = finalizeQuestTitleDescription(paired.title, paired.description);
+    title = finalized.title;
+    description = finalized.description;
     const pts = resolveQuestPoints(q.points, dqIndex);
     const defaultOrder =
       n <= 1 ? 500 : Math.round((dqIndex / Math.max(n - 1, 1)) * 999);
@@ -721,8 +784,9 @@ function parseDailyOnly(
     let description = pickQuestField(q, DAILY_QUEST_DESC_KEYS);
     const paired = pairTitleDescription(title, description);
     if (!paired) continue;
-    title = paired.title;
-    description = paired.description;
+    const finalized = finalizeQuestTitleDescription(paired.title, paired.description);
+    title = finalized.title;
+    description = finalized.description;
     const pts = resolveQuestPoints(q.points, dqIndex);
     const defaultOrder =
       n <= 1 ? 500 : Math.round((dqIndex / Math.max(n - 1, 1)) * 999);

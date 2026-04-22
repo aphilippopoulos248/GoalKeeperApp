@@ -3,7 +3,16 @@ import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/nativ
 import type { RouteProp } from '@react-navigation/native';
 import { Picker } from '@react-native-picker/picker';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { FlatList, Platform, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { DailyQuestProgressCard } from '../components/DailyQuestProgressCard';
 import { QuestRow } from '../components/QuestRow';
@@ -48,8 +57,9 @@ export function MenuScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
   const route = useRoute<RouteProp<RootTabParamList, 'Menu'>>();
   const listRef = useRef<FlatList<DailyQuestEntry>>(null);
-  const { goals } = useActiveGoals();
+  const { goals, refreshAllDailyQuestsForDebug } = useActiveGoals();
   const [sortMode, setSortMode] = useState<DailyQuestSortMode>('recommended');
+  const [debugRefreshingQuests, setDebugRefreshingQuests] = useState(false);
   const {
     completed,
     toggleQuest,
@@ -163,6 +173,67 @@ export function MenuScreen() {
       route.params?.focusQuestId,
       showDailyLoading,
     ]),
+  );
+
+  const onDebugRefreshQuests = useCallback(() => {
+    if (activeGoals.length === 0) {
+      return;
+    }
+    void (async () => {
+      setDebugRefreshingQuests(true);
+      try {
+        await refreshAllDailyQuestsForDebug();
+      } catch (e) {
+        const message =
+          e instanceof Error && e.message.trim() ? e.message : 'Quest refresh failed.';
+        Alert.alert('Debug refresh', message, [{ text: 'OK' }]);
+      } finally {
+        setDebugRefreshingQuests(false);
+      }
+    })();
+  }, [activeGoals.length, refreshAllDailyQuestsForDebug]);
+
+  const listFooter = useMemo(
+    () => (
+      <View style={styles.debugFooter}>
+        <Pressable
+          accessibilityLabel="Debug: regenerate all daily quests"
+          disabled={activeGoals.length === 0 || debugRefreshingQuests}
+          onPress={onDebugRefreshQuests}
+          style={({ pressed }) => [
+            styles.debugButton,
+            {
+              backgroundColor: colors.surfaceElevated,
+              borderColor: colors.border,
+              opacity:
+                activeGoals.length === 0 || debugRefreshingQuests
+                  ? 0.5
+                  : pressed
+                    ? 0.88
+                    : 1,
+            },
+          ]}
+        >
+          {debugRefreshingQuests ? (
+            <ActivityIndicator color={colors.textSecondary} size="small" />
+          ) : null}
+          <Text style={[styles.debugButtonText, { color: colors.textSecondary }]}>
+            Debug: refresh all daily quests
+          </Text>
+        </Pressable>
+        <Text style={[styles.debugHint, { color: colors.textSecondary }]}>
+          Regenerates copy for every active goal (dev only; resets checkmarks).
+        </Text>
+      </View>
+    ),
+    [
+      activeGoals.length,
+      colors.border,
+      colors.surfaceElevated,
+      colors.textSecondary,
+      debugRefreshingQuests,
+      onDebugRefreshQuests,
+    ],
   );
 
   const renderQuestItem = useCallback(
@@ -288,6 +359,7 @@ export function MenuScreen() {
         keyExtractor={(e) => e.quest.id}
         renderItem={renderQuestItem}
         ListHeaderComponent={listHeader}
+        ListFooterComponent={listFooter}
         keyboardShouldPersistTaps="handled"
         onScrollToIndexFailed={(info) => {
           setTimeout(() => {
@@ -352,5 +424,30 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     fontWeight: '600',
+  },
+  debugFooter: {
+    marginTop: spacing.md,
+    marginBottom: spacing.xl,
+    paddingHorizontal: spacing.xs,
+  },
+  debugButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  debugButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  debugHint: {
+    marginTop: spacing.sm,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
   },
 });

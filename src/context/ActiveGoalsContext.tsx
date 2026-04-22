@@ -13,6 +13,7 @@ import { fetchGoalsForUser, syncGoalsForUser } from '../services/supabase/goalsR
 import { fetchLifeScheduleSlots, replaceLifeScheduleSlots } from '../services/supabase/lifeScheduleRepository';
 import { migrateLegacyLocalData } from '../services/supabase/legacyMigration';
 import {
+  GoalPlannerError,
   parseLifeBusySlotsFromMessage,
   regenerateDailyQuests,
   repositionDailyQuestsPreservingQuests,
@@ -22,7 +23,7 @@ import type {
   PlannerDailyQuest,
   ReservedScheduleSlot,
 } from '../services/openaiGoalPlanner';
-import { Goal, GoalPriority, MilestoneFrequency, Quest } from '../types';
+import { Checkpoint, Goal, GoalPriority, MilestoneFrequency, Quest } from '../types';
 import { parseMilestoneFrequency } from '../utils/goalNormalize';
 import {
   clampScheduleDurationMinutes,
@@ -63,6 +64,8 @@ type ActiveGoalsContextValue = {
   lifeScheduleSlots: ReservedScheduleSlot[];
   applyLifeScheduleMessage: (message: string) => Promise<void>;
   clearLifeScheduleConstraints: () => Promise<void>;
+  /** Regenerate every active goal’s daily quests (debug; new quest IDs, completions reset). */
+  refreshAllDailyQuestsForDebug: () => Promise<void>;
 };
 
 const ActiveGoalsContext = createContext<ActiveGoalsContextValue | null>(null);
@@ -415,6 +418,60 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     await reflowDailyQuestsWithLifeSlots([]);
   }, [reflowDailyQuestsWithLifeSlots]);
 
+  const refreshAllDailyQuestsForDebug = useCallback(async () => {
+    if (!storageReady) return;
+    const todayIso = new Date().toISOString();
+    let working: Goal[] = goalsRef.current.map((g) => ({
+      ...g,
+      dailyQuests: g.dailyQuests?.map((q) => ({ ...q })),
+    }));
+    const errors: string[] = [];
+    for (const goal of working) {
+      if (goal.completed) continue;
+      try {
+        const questCount = dailyQuestCountForPriority(parseGoalPriority(goal.priority));
+        const dailyQuestsRaw = await regenerateDailyQuests({
+          title: goal.title,
+          description: goal.description,
+          targetDateIso: effectiveTargetDateIso(goal),
+          todayIso,
+          completedCheckpointCount: goal.checkpoints.filter((c) => c.done).length,
+          checkpointTitles: goal.checkpoints.map((c) => c.title),
+          dailyQuestCount: questCount,
+          milestoneFrequency: parseMilestoneFrequency(goal.milestoneFrequency),
+          reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
+            lifeScheduleSlotsRef.current,
+            working,
+            goal.id,
+          ),
+        });
+        const regenBatch = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        const newDailies: Quest[] = dailyQuestsRaw.map((q, i) => ({
+          id: `${goal.id}-ai-dq-${regenBatch}-${i + 1}`,
+          kind: 'daily' as const,
+          title: q.title,
+          description: q.description,
+          points: q.points,
+          dayOrder: q.dayOrder,
+          scheduleStartMinute: q.startMinute,
+          scheduleDurationMinutes: q.durationMinutes,
+        }));
+        working = working.map((g) =>
+          g.id === goal.id ? { ...g, dailyQuests: newDailies } : g,
+        );
+      } catch (e) {
+        const label = goal.title.trim() || goal.id;
+        const msg = e instanceof GoalPlannerError ? e.message : 'Request failed';
+        errors.push(`${label}: ${msg}`);
+        console.error('[refreshAllDailyQuestsForDebug]', goal.id, e);
+      }
+    }
+    setGoals(working);
+    if (errors.length > 0) {
+      throw new Error(errors.join('\n'));
+    }
+  }, [storageReady]);
+
   const toggleCheckpoint = useCallback((goalId: string, checkpointId: string) => {
     setGoals((prev) => {
       const oldGoal = prev.find((g) => g.id === goalId);
@@ -456,6 +513,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       lifeScheduleSlots,
       applyLifeScheduleMessage,
       clearLifeScheduleConstraints,
+      refreshAllDailyQuestsForDebug,
     }),
     [
       goals,
@@ -468,6 +526,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       lifeScheduleSlots,
       applyLifeScheduleMessage,
       clearLifeScheduleConstraints,
+      refreshAllDailyQuestsForDebug,
     ],
   );
 
