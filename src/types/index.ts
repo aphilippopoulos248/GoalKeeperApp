@@ -40,11 +40,11 @@ export interface Checkpoint {
   title: string;
   done: boolean;
   /**
-   * When false, title is a placeholder ("Milestone N") until the user unlocks and generates copy.
-   * Omitted or undefined means true (legacy checkpoints).
+   * When false, title was deferred for on-demand AI unlock (legacy). New goals from the planner
+   * set this to true at creation with real titles. Omitted or undefined means revealed.
    */
   revealed?: boolean;
-  /** Planner week offset for AI context when revealing milestone text. */
+  /** Planner week offset for AI context (e.g. legacy unlock) and cadence. */
   weekOffset?: number;
 }
 

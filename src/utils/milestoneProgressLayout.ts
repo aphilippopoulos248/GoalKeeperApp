@@ -84,3 +84,21 @@ export function isCheckpointUnlockedByBar(
   if (x === undefined) return false;
   return headX >= x - DOT_R;
 }
+
+/**
+ * The “current” milestone to work the bar toward: the first index, in order, where the
+ * quest bar has not yet reached the checkpoint (or `null` if every checkpoint is
+ * already bar-unlocked, e.g. all complete). When the bar has not been measured yet
+ * (`layout` null), every incomplete checkpoint reads as not bar-unlocked, so this is 0.
+ */
+export function getCurrentMilestoneToReachIndex(
+  checkpoints: Checkpoint[],
+  layout: TrackLayout | null,
+  headX: number,
+): number | null {
+  if (checkpoints.length === 0) return null;
+  const idx = checkpoints.findIndex(
+    (c, i) => !isCheckpointUnlockedByBar(c, i, layout, headX),
+  );
+  return idx === -1 ? null : idx;
+}

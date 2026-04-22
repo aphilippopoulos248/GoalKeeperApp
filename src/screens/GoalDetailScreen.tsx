@@ -15,6 +15,7 @@ import {
   computeBarHeadX,
   computePointsBarFraction,
   computeTrackLayout,
+  getCurrentMilestoneToReachIndex,
   isCheckpointUnlockedByBar,
   TRACK_LEFT,
 } from '../utils/milestoneProgressLayout';
@@ -56,6 +57,11 @@ export function GoalDetailScreen({ route, navigation }: Props) {
     if (!layout) return 0;
     return computeBarHeadX(pointsFraction, TRACK_LEFT, layout.trackEndX);
   }, [layout, pointsFraction]);
+
+  const currentMilestoneToReachIndex = useMemo(
+    () => getCurrentMilestoneToReachIndex(g?.checkpoints ?? [], layout, headX),
+    [g, layout, headX],
+  );
 
   if (!g) {
     return (
@@ -146,7 +152,11 @@ export function GoalDetailScreen({ route, navigation }: Props) {
           {g.checkpoints.map((c, i) => {
             const unlocked = isCheckpointUnlockedByBar(c, i, layout, headX);
             const needsReveal = c.revealed === false;
-            const lockedLabel = `${c.title}. Locked. Earn quest points until the bar reaches this milestone.`;
+            const isCurrentToReach = currentMilestoneToReachIndex === i;
+            const nextHint = isCurrentToReach
+              ? ' Current target milestone. Earn quest points until the bar reaches this one.'
+              : '';
+            const lockedLabel = `${c.title}. Locked. Earn quest points until the bar reaches this milestone.${nextHint}`;
             const openLabel = `Checkpoint: ${c.title}. ${c.done ? 'Completed' : 'Not completed'}. Tap to toggle.`;
             const unlockPromptLabel = `${c.title}. Ready to unlock. Tap to generate this milestone with AI.`;
 
@@ -238,22 +248,51 @@ export function GoalDetailScreen({ route, navigation }: Props) {
                 accessibilityRole="button"
                 accessibilityState={{ disabled: true }}
                 accessibilityLabel={lockedLabel}
-                style={[styles.checkpoint, styles.checkpointLocked, {
-                  backgroundColor: colors.surface,
-                  borderColor: colors.border,
-                }]}
+                style={[
+                  styles.checkpoint,
+                  isCurrentToReach ? null : styles.checkpointLocked,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: isCurrentToReach ? colors.primary : colors.border,
+                    borderWidth: isCurrentToReach ? 2 : 1,
+                    opacity: isCurrentToReach ? 1 : 0.62,
+                  },
+                ]}
               >
                 <View
                   style={[
                     styles.dot,
-                    { backgroundColor: colors.border },
+                    {
+                      backgroundColor: isCurrentToReach
+                        ? colors.primary
+                        : colors.border,
+                    },
                   ]}
                 />
-                <Text
-                  style={[styles.checkpointText, { color: colors.textSecondary }]}
-                >
-                  {c.title}
-                </Text>
+                <View style={styles.checkpointTitleWithBadge}>
+                  <Text
+                    style={[
+                      styles.checkpointText,
+                      { color: isCurrentToReach ? colors.text : colors.textSecondary },
+                    ]}
+                  >
+                    {c.title}
+                  </Text>
+                  {isCurrentToReach ? (
+                    <View
+                      style={[
+                        styles.nextPill,
+                        { backgroundColor: colors.primaryMuted },
+                      ]}
+                    >
+                      <Text
+                        style={[styles.nextPillText, { color: colors.primary }]}
+                      >
+                        Next
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Text style={[styles.lockedHint, { color: colors.textSecondary }]}>
                   Locked
                 </Text>
@@ -407,6 +446,25 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     lineHeight: 20,
+  },
+  checkpointTitleWithBadge: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minWidth: 0,
+  },
+  nextPill: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    flexShrink: 0,
+  },
+  nextPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   checkpointLocked: {
     opacity: 0.62,

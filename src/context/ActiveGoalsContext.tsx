@@ -207,9 +207,9 @@ function enrichmentToDailyQuests(goalId: string, enrichment: GoalPlannerFullResu
 function enrichmentToCheckpoints(goalId: string, enrichment: GoalPlannerFullResult): Checkpoint[] {
   return enrichment.checkpoints.map((c, i) => ({
     id: `${goalId}-cp-${i + 1}`,
-    title: `Milestone ${i + 1}`,
+    title: c.label.trim() || `Milestone ${i + 1}`,
     done: false,
-    revealed: false,
+    revealed: true,
     weekOffset: c.weekOffset,
   }));
 }

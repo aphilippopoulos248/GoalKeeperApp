@@ -103,6 +103,9 @@ export type GoalPlannerErrorCode =
 /** Cap AI-generated milestones per goal (long horizons still get a full year of weekly steps). */
 export const MAX_AI_CHECKPOINTS = 52;
 
+/** Max characters for checkpoint.label from planNewGoal (matches reveal path cap). */
+const MILESTONE_PLAN_LABEL_MAX = 160;
+
 export type CheckpointPlan = {
   planDurationDays: number;
   expectedCheckpointCount: number;
@@ -572,9 +575,19 @@ const REGEN_ANTI_REPETITION_RULES = `Replace mode (applies when user JSON has "r
 - If "replacePreviousQuests" is false or "previousDailyQuests" is empty, ignore this block.
 - "regenerationRequestId" in the user JSON is unique per request; each id must produce an independent new batch, not a small edit of the last output.`;
 
-/** goalType still steers SMART fields and daily quests; checkpoint labels are deferred (empty). */
-function goalTypeDeferredCheckpointNote(goalType: GoalType): string {
-  return `Goal type "${goalType}" applies to SMART fields and daily quests below. Checkpoint "label" strings are always "" (deferred).`;
+/** How checkpoint "label" strings should read; paired with goalTypeDailyQuestGuidance. */
+function goalTypeMilestoneLabelGuidance(goalType: GoalType): string {
+  switch (goalType) {
+    case 'biological':
+      return `Milestone label style (checkpoints): "biological". Phrase as **habits, systems, adherence, and measurement routines** (e.g. "Build a sustainable meal-prep cadence", "Strengthen sleep and recovery habits"). **Do not** set fixed "lose X lb this week" or similar per-period body outcomes in a milestone **label**.`;
+    case 'skill_based':
+      return `Milestone label style (checkpoints): "skill_based". Phrase as **capability, practice focus, and feedback** for that segment (e.g. "Get consistent deliberate practice with feedback", "Increase difficulty in small steps")—not a list of sub-skills for week 1/2/3.`;
+    case 'outcome_based':
+      return `Milestone label style (checkpoints): "outcome_based". **Concrete, verifiable** themes toward the outcome (pipeline, prep, shipping work); **no** guaranteed job/relationship/personal results in a label.`;
+    case 'linear':
+    default:
+      return `Milestone label style (checkpoints): "linear". You may use **clear numeric or quota** language **only** when the user's title/description are explicitly a numeric/tracking goal. Otherwise prefer **themed, systems-style** labels like other types. **Do not** use three nearly identical "lose 5 lb" (or like) rungs in a row unless the user explicitly asked for a pure numeric step ladder.`;
+  }
 }
 
 function goalTypeDailyQuestGuidance(goalType: GoalType): string {
@@ -603,10 +616,15 @@ function buildFullSystem(
 - The user JSON includes planDurationDays, expectedCheckpointCount, expectedWeekOffsets, milestoneFrequency ("${milestoneFrequency}"), goalType ("${goalType}"), todayIso, and targetDateIso.
 - You MUST return exactly ${checkpointPlan.expectedCheckpointCount} objects in "checkpoints" (no fewer, no more).
 - For each index i, checkpoints[i].weekOffset MUST equal expectedWeekOffsets[i]. Required sequence: [${offsetsList}]. weekOffset is the week number from goal start (1 = end of week 1).
-- Each checkpoint "label" MUST be the empty string "" (no milestone wording here). The app shows numbered placeholders until the user unlocks each milestone later.
-- **Progression (for your mental model only):** Early checkpoints correspond to first slices toward the outcome; the **last** checkpoint aligns with completing the stated goal by targetDateIso—interpret via goalType when you write SMART fields and dailies (linear = metric progress; biological = systems/trends; skill = practice ladder; outcome = meaningful steps without guarantees).
+- Each checkpoint "label" MUST be a **non-empty** string: the **user-visible milestone name** (short phrase, under 160 characters). The app shows this text immediately, including for not-yet-reached periods.
 
-${goalTypeDeferredCheckpointNote(goalType)}
+**Milestone label style (structured, not a shallow numeric ladder):**
+- Prefer **themes, systems, and habits** for that time window (e.g. "Build consistency with meal prep", "Establish a sustainable training rhythm") rather than "Milestone 1: lose 5 lb" / "Milestone 2: lose 5 lb" in a row.
+- **Forbidden in labels:** any prefix like "Milestone 1:" or "Week 3:"; leading numbering in the string; copy-paste of the same micro-metric for every period.
+- **Variety across periods:** each label should be **distinct in substance**; advance the *kind* of focus (e.g. environment → behavior → measurement → resilience) as appropriate, not a mechanical repeat of one metric.
+- **Progression (mental model only):** Early checkpoints are earlier slices of the path; the **last** label should read as *aligned* with reaching the goal by targetDateIso. SMART fields and dailies still follow **goalType**.
+
+${goalTypeMilestoneLabelGuidance(goalType)}
 
 Milestones vs daily quests:
 - Milestones are the **cadence-sized slice** of the outcome for that period—not necessarily a single dramatic leap. They remain **larger** than any one daily quest.
@@ -621,7 +639,7 @@ Fields:
 - relevant: string (SMART Relevant)
 - timeBound: string (one clear sentence: deadline and horizon in plain language)
 - timeBoundCritique: string (one short honest critique of whether the deadline is realistic for the outcome; suggest adjustment if needed)
-- checkpoints: array of { "weekOffset": number, "label": string } — every "label" must be "".
+- checkpoints: array of { "weekOffset": number, "label": string } — each "label" must be a **non-empty** user-visible string (milestone name), under 160 characters, following the **Checkpoints (critical)** rules above.
 
 ${milestoneBlock}
 
@@ -659,7 +677,7 @@ const JSEARCH_PLANNER_RULES = `JSearch job market context (applies when the user
 - That string summarizes **real** recent job listings from a search API—use it only to **inform** realistic job-search progression: skills to highlight, pipeline habits, interview prep, networking, application cadence.
 - **Do not** paste job titles, employer names, or listing text verbatim into daily quest **titles** or **descriptions**. Write quests as **generic actions** (e.g. "Tailor resume to one target role family", "Complete one mock interview question", "Identify three companies to research").
 - **Do not** promise the user will be hired at any specific employer or role named in jsearchContext.
-- Checkpoint "label" strings remain "" where required; SMART fields and dailies should still feel credible for **job search** when the goal is career-related.
+- **Checkpoint "label"** fields must be non-empty, credible **job-search themes** (pipeline, skills, applications, networking) for each period, following the same structured milestone rules as the main plan—no empty labels.
 - You may refer **abstractly** to skills or role families suggested by the sample (e.g. "roles in this lane often emphasize communication") without quoting listings.`;
 
 function appendSpoonacularRules(
@@ -981,6 +999,11 @@ function pairTitleDescription(
   return undefined;
 }
 
+function clampPlanMilestoneLabel(trimmed: string): string {
+  if (trimmed.length <= MILESTONE_PLAN_LABEL_MAX) return trimmed;
+  return `${trimmed.slice(0, MILESTONE_PLAN_LABEL_MAX).trim()}…`;
+}
+
 function parseFullResult(
   data: unknown,
   dailyQuestCount: number,
@@ -1045,6 +1068,19 @@ function parseFullResult(
         'checkpoint_mismatch',
       );
     }
+  }
+  for (let i = 0; i < checkpoints.length; i++) {
+    const raw = checkpoints[i].label.trim();
+    if (!raw) {
+      throw new GoalPlannerError(
+        `Checkpoints: at index ${i} label must be non-empty`,
+        'checkpoint_mismatch',
+      );
+    }
+    checkpoints[i] = {
+      weekOffset: checkpoints[i].weekOffset,
+      label: clampPlanMilestoneLabel(raw),
+    };
   }
 
   if (!Array.isArray(data.dailyQuests)) {
@@ -1439,7 +1475,7 @@ export async function planNewGoal(
     if (isRetry) {
       system += `
 
-RETRY — Your previous reply failed validation. checkpoints must contain exactly ${checkpointPlan.expectedCheckpointCount} items, and each checkpoints[i].weekOffset must equal expectedWeekOffsets[i] in order: [${checkpointPlan.expectedWeekOffsets.join(', ')}]. Reply with a single valid JSON object; follow all other rules unchanged.`;
+RETRY — Your previous reply failed validation. checkpoints must contain exactly ${checkpointPlan.expectedCheckpointCount} items; each checkpoints[i].weekOffset must equal expectedWeekOffsets[i] in order: [${checkpointPlan.expectedWeekOffsets.join(', ')}]; and each checkpoints[i].label must be a non-empty string (user-visible milestone name, under 160 characters). Reply with a single valid JSON object; follow all other rules unchanged.`;
     }
     const data = await postChatJson(system, user, {
       temperature: isRetry ? 0.35 : undefined,
