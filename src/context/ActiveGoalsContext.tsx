@@ -274,6 +274,9 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
               goals,
               snapshot.id,
             ),
+            previousDailyQuests: (snapshot.dailyQuests ?? [])
+              .filter((q) => q.kind === 'daily')
+              .map((q) => ({ title: q.title, description: q.description })),
           });
           const regenBatch = Date.now();
           setGoals((cur) =>
@@ -444,6 +447,9 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
             working,
             goal.id,
           ),
+          previousDailyQuests: (goal.dailyQuests ?? [])
+            .filter((q) => q.kind === 'daily')
+            .map((q) => ({ title: q.title, description: q.description })),
         });
         const regenBatch = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         const newDailies: Quest[] = dailyQuestsRaw.map((q, i) => ({

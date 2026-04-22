@@ -52,6 +52,11 @@ export type GoalPlannerBaseParams = {
 
 export type RegenerateDailyQuestsParams = GoalPlannerBaseParams & {
   checkpointTitles: string[];
+  /**
+   * When set, the model must not repeat these titles/actions (e.g. after a user refresh).
+   * Omit or use [] for first-time backfill.
+   */
+  previousDailyQuests?: Array<{ title: string; description: string }>;
 };
 
 export type GoalPlannerErrorCode =
@@ -356,6 +361,14 @@ const DAILY_QUEST_COPY_AND_TIER_RULES = `Daily quest text (critical):
   - 2+: noticeably harder day-sized actions (time, volume, or intensity) than at 0—still **safer and smaller** than a full checkpoint/milestone; never replace a milestone.
 - **Examples (flavor only; match the user's goal):** "Read more" with 0 milestones: choose a book → read 5 pages → read 10 pages. "Socialize more" with 0: watch one specific short video on conversation skills → practice talking aloud in a mirror for 1 minute. "Get fit" with 2+ milestones: 20 push-ups in one set, run 5 km outside, etc.`;
 
+const REGEN_ANTI_REPETITION_RULES = `Replace mode (applies when user JSON has "replacePreviousQuests": true and a non-empty "previousDailyQuests" array):
+- That array lists the **old** daily quests being **fully replaced**. You must output a **new** set of quests, not a light revision.
+- New titles and descriptions must be **substantively different** from every previous title and every previous description: use **different** core verbs, nouns, objects, and *kinds* of action (e.g. if the old set was all "read N pages", switch to a mix: select material, time-boxed session, note one takeaway, audio, new location, etc.—whatever fits the goal but **not** the same three beats).
+- **Forbidden:** reusing a previous title; minor word swaps ("5" vs "five"); the same main action with a different number; the same three-step story with tweaked wording; overlapping first three words of any previous title.
+- **Required:** at least one quest should feel like a **different angle** on the goal (preparation, reflection, environment, social, measurement, or recovery—not only "more of the same primary behavior").
+- If "replacePreviousQuests" is false or "previousDailyQuests" is empty, ignore this block.
+- "regenerationRequestId" in the user JSON is unique per request; each id must produce an independent new batch, not a small edit of the last output.`;
+
 function buildFullSystem(
   dailyQuestCount: number,
   milestoneFrequency: MilestoneFrequency,
@@ -402,6 +415,8 @@ dailyQuests must have exactly ${n} items: { "title", "description", "points", "d
 
 ${DAILY_QUEST_COPY_AND_TIER_RULES}
 
+${REGEN_ANTI_REPETITION_RULES}
+
 Rules:
 - The user JSON includes "checkpointTitles": the existing milestone names for this goal. Daily quests must be **smaller preparatory steps** (practice, study, low-stakes drills) that **support** those milestones—**not** duplicate them. Daily quests should feel **easier** than completing a milestone; milestones stay the **bold stretch** challenges. Use "completedCheckpointCount" and "checkpointTitles" to match difficulty and the **next** not-yet-done milestones to the dailies you write.
 - The user message includes milestoneFrequency (weekly / biweekly / monthly). Align daily quest pacing and tone with that cadence (e.g. smaller daily steps when milestones are weekly vs monthly).
@@ -441,7 +456,13 @@ function normalizeTitleKey(s: string): string {
   return s.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-async function postChatJson(system: string, user: string): Promise<unknown> {
+type PostChatOptions = { temperature?: number };
+
+async function postChatJson(
+  system: string,
+  user: string,
+  options?: PostChatOptions,
+): Promise<unknown> {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new GoalPlannerError(
@@ -449,6 +470,11 @@ async function postChatJson(system: string, user: string): Promise<unknown> {
       'missing_key',
     );
   }
+
+  const temperature =
+    typeof options?.temperature === 'number' && Number.isFinite(options.temperature)
+      ? Math.min(2, Math.max(0, options.temperature))
+      : 0.35;
 
   let res: Response;
   try {
@@ -460,7 +486,7 @@ async function postChatJson(system: string, user: string): Promise<unknown> {
       },
       body: JSON.stringify({
         model: MODEL,
-        temperature: 0.35,
+        temperature,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: system },
@@ -976,6 +1002,13 @@ export async function regenerateDailyQuests(
 ): Promise<GoalPlannerFullResult['dailyQuests']> {
   const dailyQuestCount = clampQuestCount(params.dailyQuestCount);
   const milestoneFrequency = params.milestoneFrequency ?? 'weekly';
+  const previousDailyQuests = (params.previousDailyQuests ?? [])
+    .filter((q) => (q.title?.trim() ?? '') !== '' || (q.description?.trim() ?? '') !== '')
+    .map((q) => ({
+      title: (q.title ?? '').trim(),
+      description: (q.description ?? '').trim(),
+    }));
+  const replacePreviousQuests = previousDailyQuests.length > 0;
   const user = JSON.stringify({
     title: params.title,
     description: params.description,
@@ -986,9 +1019,15 @@ export async function regenerateDailyQuests(
     dailyQuestCount,
     milestoneFrequency,
     reservedScheduleSlots: params.reservedScheduleSlots ?? [],
+    previousDailyQuests: replacePreviousQuests ? previousDailyQuests : [],
+    replacePreviousQuests,
+    /** Unique per request so the model treats each refresh as a new generation, not a tweak of the last. */
+    regenerationRequestId: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
   });
 
-  const data = await postChatJson(buildRegenSystem(dailyQuestCount), user);
+  const data = await postChatJson(buildRegenSystem(dailyQuestCount), user, {
+    temperature: replacePreviousQuests ? 0.72 : 0.35,
+  });
   return parseDailyOnly(data, dailyQuestCount, params.reservedScheduleSlots);
 }
 
