@@ -1,10 +1,15 @@
 import Constants from 'expo-constants';
 
-import { isQuestAssistExerciseRelated } from '../utils/exerciseGoalDetection';
+import {
+  isQuestAssistExerciseRelated,
+  userWantsExerciseVisuals,
+} from '../utils/exerciseGoalDetection';
 
 const BASE = 'https://exercisedb.p.rapidapi.com';
 const RAPID_HOST = 'exercisedb.p.rapidapi.com';
 const ASSIST_CARD_LIMIT = 6;
+/** BASIC RapidAPI tier: 180px GIF stream from GET /image */
+const EXERCISE_GIF_RESOLUTION = 180;
 
 function getRapidApiKey(): string {
   const fromProcess = process.env.EXPO_PUBLIC_RAPIDAPI_KEY;
@@ -129,6 +134,34 @@ function pickGifUrl(raw: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+/**
+ * Direct GIF URL for Image components (RapidAPI streams GIF; key in query is required for RN Image).
+ * @see https://edb-docs.up.railway.app/docs/image-service/image
+ */
+export function getExerciseAnimationUrl(exerciseId: string): string | null {
+  const id = exerciseId.trim();
+  if (!id) return null;
+  const key = getRapidApiKey();
+  if (!key) return null;
+  return `${BASE}/image?exerciseId=${encodeURIComponent(id)}&resolution=${EXERCISE_GIF_RESOLUTION}&rapidapi-key=${encodeURIComponent(key)}`;
+}
+
+export function withRapidApiExerciseAnimationUrls(exercises: AssistExercise[]): AssistExercise[] {
+  if (!getRapidApiKey()) return exercises;
+  return exercises.map((ex) => {
+    if (typeof ex.gifUrl === 'string' && ex.gifUrl.length > 0) return ex;
+    const url = getExerciseAnimationUrl(ex.id);
+    return url ? { ...ex, gifUrl: url } : ex;
+  });
+}
+
+export function withRapidApiAnimationUrl(full: AssistFullExercise): AssistFullExercise {
+  if (!getRapidApiKey()) return full;
+  if (typeof full.gifUrl === 'string' && full.gifUrl.length > 0) return full;
+  const url = getExerciseAnimationUrl(full.id);
+  return url ? { ...full, gifUrl: url } : full;
+}
+
 function coerceId(rawId: unknown): string | null {
   if (typeof rawId === 'string' && rawId.trim()) return rawId.trim();
   if (typeof rawId === 'number' && Number.isFinite(rawId)) return String(rawId);
@@ -247,6 +280,16 @@ export async function fetchExerciseSuggestionsForAssist(params: {
 
 export type RecentAssistExercise = { id: string; name: string };
 
+export function assistExercisesFromRecent(recent: RecentAssistExercise[]): AssistExercise[] {
+  return recent.map((r) => ({
+    id: r.id,
+    name: r.name,
+    bodyPart: '',
+    target: '',
+    equipment: '',
+  }));
+}
+
 /**
  * Pick exercise id from planner hints, pronouns, and exercises already shown.
  */
@@ -282,6 +325,11 @@ export function resolveAssistFullExerciseId(params: {
     /\b(the\s+)?one\s+you\s+(showed|sent|listed)\b/.test(u) ||
     /\bhow\s+do\s+i\s+do\s+(this|that|it)\b/.test(u)
   ) {
+    return recent[recent.length - 1]!.id;
+  }
+
+  if (userWantsExerciseVisuals(params.userMessage)) {
+    if (/\b(all|each|every|those|these|them|ones)\b/.test(u)) return null;
     return recent[recent.length - 1]!.id;
   }
   return null;

@@ -85,6 +85,24 @@ export function isExerciseFitnessGoal(title: string, description: string): boole
   return false;
 }
 
+/**
+ * User is asking to see demos / GIFs / photos of movements (ExerciseDB streams GIFs from /image).
+ */
+export function userWantsExerciseVisuals(userMessage: string): boolean {
+  const u = userMessage.toLowerCase();
+  return (
+    /\b(gif|gifs|picture|pictures|pic|pics|photo|photos|image|images|thumbnail|thumbnails)\b/.test(
+      u,
+    ) ||
+    /\b(animation|animations|animated|demo|demos|clip|clips)\b/.test(u) ||
+    /\b(visual|visuals|diagram|illustration)\b/.test(u) ||
+    /\bwhat\s+.*\s+look\s+like\b/.test(u) ||
+    /\bshow\s+me\s+(a|an|the|some)?\s*(gif|picture|pic|photo|image|animation|demo)\b/.test(u) ||
+    /\bshow\s+me\s+what\s+it\s+looks\s+like\b/.test(u) ||
+    /\b(can|could)\s+i\s+see\s+(a|an|the|it|this|that|them|gif|picture|photo|image)\b/.test(u)
+  );
+}
+
 export function isQuestAssistExerciseRelated(params: {
   goalTitle: string;
   goalDescription: string;

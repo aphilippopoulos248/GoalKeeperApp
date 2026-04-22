@@ -1,7 +1,10 @@
 import Constants from 'expo-constants';
 
 import { isQuestAssistFoodRelated } from '../utils/nutritionGoalDetection';
-import { isQuestAssistExerciseRelated } from '../utils/exerciseGoalDetection';
+import {
+  isQuestAssistExerciseRelated,
+  userWantsExerciseVisuals,
+} from '../utils/exerciseGoalDetection';
 
 const MODEL = 'gpt-4o-mini';
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
@@ -76,13 +79,13 @@ Intent rules (food):
 3) **suggest_recipes** — User wants **new** meal/recipe **ideas** ("what should I cook", food-focused "more options"). Card grid only.
 
 Intent rules (exercise):
-4) **full_exercise** — User wants **how to perform** a **specific** movement ("how do I do a squat", "proper form for deadlift", "steps for this exercise", "walk me through this move"). Prefer an id from the exercise list when they refer to a shown card. **Not** for vague "give me workout ideas".
+4) **full_exercise** — User wants **how to perform** a **specific** movement ("how do I do a squat", "proper form for deadlift", "steps for this exercise", "walk me through this move"), **or** wants a **GIF / picture / animation / demo** of one specific exercise. Prefer an id from the exercise list when they refer to a shown card. **Not** for vague "give me workout ideas".
 
-5) **suggest_exercises** — User wants **new** exercise or workout **ideas** ("what should I do for legs", "more exercises", movement ideas). Card grid only.
+5) **suggest_exercises** — User wants **new** exercise or workout **ideas** ("what should I do for legs", "more exercises", movement ideas). Card grid only. If they also ask for **images/GIFs** of several exercises already listed, you may answer with **chat_only** and a short line—the app can attach demos for exercises already in context.
 
 6) **chat_only** — Motivation, planning, generic tips without needing recipe/nutrition/exercise API data.
 
-**Critical:** Only one intent per turn. Prefer the **latest user message**: if they clearly mean food, use a food intent; if they clearly mean training/movement, use an exercise intent. "Recipe for X" → **full_recipe**. "How do I do X" (exercise) → **full_exercise**.
+**Critical:** Only one intent per turn. Prefer the **latest user message**: if they clearly mean food, use a food intent; if they clearly mean training/movement, use an exercise intent. "Recipe for X" → **full_recipe**. "How do I do X" (exercise) → **full_exercise**. "Show me a GIF/image of this exercise" (one movement) → **full_exercise**. "Show me GIFs for all of those" (several already listed) → **chat_only** with a brief reply.
 
 Reply rules:
 - **full_recipe**: 1–2 short sentences; the app will show ingredients and steps below. Do not invent ingredients.
@@ -300,6 +303,57 @@ function heuristicPlan(params: {
     ) ||
     /\bmore\s+(options|ideas)\b/.test(u) ||
     (exerciseContext && /\b(any|some)\s+ideas\b/.test(u) && !foodLean);
+
+  const wantsExerciseVisuals =
+    userWantsExerciseVisuals(params.latestUserMessage) &&
+    exerciseContext &&
+    !foodLean &&
+    (exerciseLean || recentEx.length > 0);
+
+  const wantsAllExerciseVisuals =
+    wantsExerciseVisuals &&
+    !wantsNewExercises &&
+    /\b(all|each|every|those|these|them|ones|listed)\b/.test(u) &&
+    recentEx.length > 1;
+
+  if (wantsAllExerciseVisuals) {
+    return {
+      intent: 'chat_only',
+      reply: '',
+      ...emptyHints(),
+    };
+  }
+
+  if (
+    wantsExerciseVisuals &&
+    !wantsNewExercises &&
+    lastExerciseId != null &&
+    recentEx.length >= 1
+  ) {
+    return {
+      intent: 'full_exercise',
+      reply: 'Here is the animated demo:',
+      ...emptyHints(),
+      fullExerciseId: lastExerciseId,
+      fullExerciseNameHint: null,
+    };
+  }
+
+  if (
+    wantsExerciseVisuals &&
+    !wantsNewExercises &&
+    lastExerciseId == null &&
+    exerciseLean
+  ) {
+    const hint = params.latestUserMessage.trim().slice(0, 120);
+    return {
+      intent: 'full_exercise',
+      reply: 'Here is an animated demo:',
+      ...emptyHints(),
+      fullExerciseId: null,
+      fullExerciseNameHint: hint || null,
+    };
+  }
 
   const wantsFullRecipe =
     /\b(recipe\s+for|how\s+(do\s+i|to)\s+make|how\s+to\s+cook|full\s+recipe|ingredients\s+(for|to)|step\s*by\s*step|instructions\s+for|cook\s+this|make\s+this)\b/.test(

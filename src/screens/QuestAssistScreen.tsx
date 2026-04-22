@@ -27,13 +27,20 @@ import {
   type QuestAssistHistoryEntry,
 } from '../services/questAssistOpenai';
 import {
+  assistExercisesFromRecent,
   fetchExerciseSuggestionsForAssist,
   fetchFullExerciseInformation,
   resolveAssistFullExerciseId,
   searchExerciseIdByName,
+  withRapidApiAnimationUrl,
+  withRapidApiExerciseAnimationUrls,
   type AssistExercise,
   type AssistFullExercise,
 } from '../services/exerciseDbRapidApi';
+import {
+  isQuestAssistExerciseRelated,
+  userWantsExerciseVisuals,
+} from '../utils/exerciseGoalDetection';
 import {
   fetchFullRecipeInformation,
   fetchRecipeNutritionSummary,
@@ -111,6 +118,19 @@ function extractRecentExercisesFromMessages(messages: ChatMessage[]): {
     if ('fullExercise' in m && m.fullExercise) {
       out.push({ id: m.fullExercise.id, name: m.fullExercise.name });
     }
+  }
+  return out;
+}
+
+function dedupeRecentAssistExercises(
+  recent: { id: string; name: string }[],
+): { id: string; name: string }[] {
+  const seen = new Set<string>();
+  const out: { id: string; name: string }[] = [];
+  for (const r of recent) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(r);
   }
   return out;
 }
@@ -276,6 +296,7 @@ export function QuestAssistScreen() {
       if (!last || last.role !== 'user') return;
 
       const userMessage = last.text;
+      const wantsVisual = userWantsExerciseVisuals(userMessage);
       const prior = allMessages.slice(0, -1);
       const recentRecipes = extractRecentRecipesFromMessages(prior);
       const recentExercises = extractRecentExercisesFromMessages(prior);
@@ -357,6 +378,9 @@ export function QuestAssistScreen() {
           userMessage,
         });
         exercises = list ?? undefined;
+        if (exercises && wantsVisual) {
+          exercises = withRapidApiExerciseAnimationUrls(exercises);
+        }
         if (!text) text = fallbackExerciseAssistIntro(!!exercises?.length);
       } else if (plan.intent === 'full_exercise') {
         let eid = resolveAssistFullExerciseId({
@@ -370,13 +394,28 @@ export function QuestAssistScreen() {
         }
         const full = eid != null ? await fetchFullExerciseInformation(eid) : null;
         if (full) {
-          fullExercise = full;
+          fullExercise = wantsVisual ? withRapidApiAnimationUrl(full) : full;
           if (!text) text = 'Here is how to perform the movement:';
         } else {
           text =
             text ||
             "I couldn’t load that exercise. Try a name from the list above or be more specific.";
         }
+      } else if (
+        plan.intent === 'chat_only' &&
+        wantsVisual &&
+        isQuestAssistExerciseRelated({
+          goalTitle: goal.title,
+          goalDescription: goal.description,
+          questTitle: quest.title,
+          questDescription: quest.description,
+          userMessage,
+        }) &&
+        recentExercises.length > 0
+      ) {
+        const deduped = dedupeRecentAssistExercises(recentExercises);
+        exercises = withRapidApiExerciseAnimationUrls(assistExercisesFromRecent(deduped));
+        if (!text) text = 'Here are animated demos for those movements:';
       } else if (!text) {
         text = fallbackChatOnlyReply();
       }
