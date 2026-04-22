@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 
 import { isQuestAssistFoodRelated } from '../utils/nutritionGoalDetection';
+import { isQuestAssistExerciseRelated } from '../utils/exerciseGoalDetection';
 
 const MODEL = 'gpt-4o-mini';
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions';
@@ -32,42 +33,63 @@ export type QuestAssistHistoryEntry = {
   recipeIds?: number[];
   /** When the assistant showed a full recipe card. */
   fullRecipeSpoonacularId?: number;
+  /** ExerciseDB ids for exercise cards the assistant attached. */
+  exerciseIds?: string[];
+  /** When the assistant showed full exercise instructions. */
+  fullExerciseId?: string;
 };
 
 export type QuestAssistPlan = {
-  intent: 'chat_only' | 'suggest_recipes' | 'nutrition_for_recipe' | 'full_recipe';
+  intent:
+    | 'chat_only'
+    | 'suggest_recipes'
+    | 'nutrition_for_recipe'
+    | 'full_recipe'
+    | 'suggest_exercises'
+    | 'full_exercise';
   reply: string;
   nutritionRecipeId: number | null;
   nutritionRecipeTitleHint: string | null;
   fullRecipeSpoonacularId: number | null;
   fullRecipeTitleHint: string | null;
+  fullExerciseId: string | null;
+  fullExerciseNameHint: string | null;
 };
 
-const PLANNER_SYSTEM = `You are the routing brain for a short "quest assist" chat. The app may attach recipe cards, full recipes (ingredients + steps), or nutrient data from Spoonacular—you decide what is needed for this turn.
+const PLANNER_SYSTEM = `You are the routing brain for a short "quest assist" chat. The app may attach recipe cards, full recipes (ingredients + steps), or nutrient data from Spoonacular, and/or exercise cards and full exercise instructions from ExerciseDB—you decide what is needed for this turn.
 
 Output a single JSON object only (no markdown fences) with exactly these keys:
-- "intent": one of "chat_only", "suggest_recipes", "nutrition_for_recipe", "full_recipe"
+- "intent": one of "chat_only", "suggest_recipes", "nutrition_for_recipe", "full_recipe", "suggest_exercises", "full_exercise"
 - "reply": string — plain text, no markdown. Must **directly answer** the user's latest message in a natural way.
 - "nutritionRecipeId": number or null — use when intent is nutrition_for_recipe and the recipe is in "Recipes shown in this chat".
 - "nutritionRecipeTitleHint": string or null — only if nutrition id is unknown: best dish name to search.
 - "fullRecipeSpoonacularId": number or null — use when intent is full_recipe and the recipe is in "Recipes shown in this chat".
 - "fullRecipeTitleHint": string or null — when user names a dish not in the list, or id unknown: dish name to look up.
+- "fullExerciseId": string or null — use when intent is full_exercise and the exercise is in "Exercises shown in this chat" (string id).
+- "fullExerciseNameHint": string or null — when the user names a movement not in the list, or id unknown: exercise name to look up.
 
-Intent rules:
-1) **full_recipe** — User wants **ingredients and/or step-by-step instructions** for a **specific** dish ("recipe for lasagna", "how do I make X", "full instructions", "what goes in…", "walk me through"). Prefer an id from the list when they refer to a shown card. **Do not** use for vague "more ideas" without a specific dish.
+Intent rules (food):
+1) **full_recipe** — User wants **ingredients and/or step-by-step instructions** for a **specific** dish ("recipe for lasagna", "how do I make X", "how to cook", "what goes in…"). Prefer an id from the recipe list when they refer to a shown card. **Do not** use for vague "more ideas" without a specific dish.
 
-2) **nutrition_for_recipe** — User asks how nutritious/healthy something is, calories, macros, micronutrients, for **one** dish. Pick id from the list when they say "this recipe", etc.
+2) **nutrition_for_recipe** — User asks how nutritious/healthy something is, calories, macros, for **one** dish. Pick id from the list when they say "this recipe", etc.
 
-3) **suggest_recipes** — User wants **new** meal/recipe **ideas** or browsing ("what should I cook", "more options"). Card grid only, not full instructions.
+3) **suggest_recipes** — User wants **new** meal/recipe **ideas** ("what should I cook", food-focused "more options"). Card grid only.
 
-4) **chat_only** — Motivation, planning, generic tips without API recipe/nutrition/full detail, non-food quests.
+Intent rules (exercise):
+4) **full_exercise** — User wants **how to perform** a **specific** movement ("how do I do a squat", "proper form for deadlift", "steps for this exercise", "walk me through this move"). Prefer an id from the exercise list when they refer to a shown card. **Not** for vague "give me workout ideas".
 
-**Critical:** Only one intent per turn. "Recipe for X" → **full_recipe**, not suggest_recipes.
+5) **suggest_exercises** — User wants **new** exercise or workout **ideas** ("what should I do for legs", "more exercises", movement ideas). Card grid only.
+
+6) **chat_only** — Motivation, planning, generic tips without needing recipe/nutrition/exercise API data.
+
+**Critical:** Only one intent per turn. Prefer the **latest user message**: if they clearly mean food, use a food intent; if they clearly mean training/movement, use an exercise intent. "Recipe for X" → **full_recipe**. "How do I do X" (exercise) → **full_exercise**.
 
 Reply rules:
 - **full_recipe**: 1–2 short sentences; the app will show ingredients and steps below. Do not invent ingredients.
 - **nutrition_for_recipe**: 1–2 sentences; app appends nutrient list.
-- **suggest_recipes**: one short intro; cards below.
+- **suggest_recipes**: one short intro; recipe cards below.
+- **full_exercise**: 1–2 short sentences; app will show instructions below. Do not invent steps.
+- **suggest_exercises**: one short intro; exercise cards below.
 - **chat_only**: complete answer in "reply".`;
 
 function buildPlannerUserPayload(params: {
@@ -77,6 +99,7 @@ function buildPlannerUserPayload(params: {
   questTitle: string;
   questDescription: string;
   recentRecipes: { id: number; title: string }[];
+  recentExercises: { id: string; name: string }[];
   history: QuestAssistHistoryEntry[];
   latestUserMessage: string;
 }): string {
@@ -93,7 +116,17 @@ function buildPlannerUserPayload(params: {
         Number.isFinite(h.fullRecipeSpoonacularId)
           ? ` [full recipe id: ${h.fullRecipeSpoonacularId}]`
           : '';
-      return `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.text.trim()}${ids}${fullId}`;
+      const exIds =
+        h.role === 'assistant' && h.exerciseIds && h.exerciseIds.length > 0
+          ? ` [exercise card ids: ${h.exerciseIds.join(', ')}]`
+          : '';
+      const fullEx =
+        h.role === 'assistant' &&
+        typeof h.fullExerciseId === 'string' &&
+        h.fullExerciseId.trim().length > 0
+          ? ` [full exercise id: ${h.fullExerciseId.trim()}]`
+          : '';
+      return `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.text.trim()}${ids}${fullId}${exIds}${fullEx}`;
     })
     .join('\n');
 
@@ -107,6 +140,9 @@ function buildPlannerUserPayload(params: {
     '',
     '## Recipes already shown in this chat (id → title). Use ids for nutrition_for_recipe and full_recipe when the user refers to them.',
     JSON.stringify(params.recentRecipes),
+    '',
+    '## Exercises already shown in this chat (id → name). Use ids for full_exercise when the user refers to them.',
+    JSON.stringify(params.recentExercises),
     '',
     '## Conversation so far',
     prior.length > 0 ? prior : '(no prior messages)',
@@ -133,7 +169,9 @@ function parseQuestAssistPlan(content: string): QuestAssistPlan | null {
     intent !== 'chat_only' &&
     intent !== 'suggest_recipes' &&
     intent !== 'nutrition_for_recipe' &&
-    intent !== 'full_recipe'
+    intent !== 'full_recipe' &&
+    intent !== 'suggest_exercises' &&
+    intent !== 'full_exercise'
   ) {
     return null;
   }
@@ -159,6 +197,17 @@ function parseQuestAssistPlan(content: string): QuestAssistPlan | null {
       ? raw.fullRecipeTitleHint.trim()
       : null;
 
+  let fullExerciseId: string | null = null;
+  if (typeof raw.fullExerciseId === 'string' && raw.fullExerciseId.trim()) {
+    fullExerciseId = raw.fullExerciseId.trim();
+  } else if (typeof raw.fullExerciseId === 'number' && Number.isFinite(raw.fullExerciseId)) {
+    fullExerciseId = String(raw.fullExerciseId);
+  }
+  const fullExerciseNameHint =
+    typeof raw.fullExerciseNameHint === 'string' && raw.fullExerciseNameHint.trim()
+      ? raw.fullExerciseNameHint.trim()
+      : null;
+
   return {
     intent,
     reply,
@@ -166,18 +215,33 @@ function parseQuestAssistPlan(content: string): QuestAssistPlan | null {
     nutritionRecipeTitleHint,
     fullRecipeSpoonacularId,
     fullRecipeTitleHint,
+    fullExerciseId,
+    fullExerciseNameHint,
   };
 }
 
 const emptyHints = (): Pick<
   QuestAssistPlan,
-  'nutritionRecipeId' | 'nutritionRecipeTitleHint' | 'fullRecipeSpoonacularId' | 'fullRecipeTitleHint'
+  | 'nutritionRecipeId'
+  | 'nutritionRecipeTitleHint'
+  | 'fullRecipeSpoonacularId'
+  | 'fullRecipeTitleHint'
+  | 'fullExerciseId'
+  | 'fullExerciseNameHint'
 > => ({
   nutritionRecipeId: null,
   nutritionRecipeTitleHint: null,
   fullRecipeSpoonacularId: null,
   fullRecipeTitleHint: null,
+  fullExerciseId: null,
+  fullExerciseNameHint: null,
 });
+
+export function fallbackExerciseAssistIntro(hasExercises: boolean): string {
+  return hasExercises
+    ? 'Here are some exercise ideas that could fit your quest.'
+    : 'Here is a quick thought for your quest—tell me if you want movement ideas or details.';
+}
 
 function heuristicPlan(params: {
   goalTitle: string;
@@ -186,10 +250,14 @@ function heuristicPlan(params: {
   questDescription: string;
   latestUserMessage: string;
   recentRecipes: { id: number; title: string }[];
+  recentExercises: { id: string; name: string }[];
 }): QuestAssistPlan {
   const u = params.latestUserMessage.toLowerCase();
   const recent = params.recentRecipes;
   const lastId = recent.length > 0 ? recent[recent.length - 1]!.id : null;
+  const recentEx = params.recentExercises;
+  const lastExerciseId =
+    recentEx.length > 0 ? recentEx[recentEx.length - 1]!.id : null;
 
   const foodContext = isQuestAssistFoodRelated({
     goalTitle: params.goalTitle,
@@ -198,6 +266,21 @@ function heuristicPlan(params: {
     questDescription: params.questDescription,
     userMessage: params.latestUserMessage,
   });
+
+  const exerciseContext = isQuestAssistExerciseRelated({
+    goalTitle: params.goalTitle,
+    goalDescription: params.goalDescription,
+    questTitle: params.questTitle,
+    questDescription: params.questDescription,
+    userMessage: params.latestUserMessage,
+  });
+
+  const foodLean =
+    /\b(cook|eat|meal|recipe|food|dinner|lunch|breakfast|snack|ingredients)\b/.test(u);
+  const exerciseLean =
+    /\b(workout|exercise|exercises|lift|lifting|squat|deadlift|pushup|push-up|pullup|pull-up|rep|reps|set|sets|gym|run|cardio|muscle|stretch|mobility|legs|chest|back|core|arms)\b/.test(
+      u,
+    );
 
   const wantsNutrition =
     /\b(nutrit|nutrition|nutrients|calorie|calories|kcal|macro|macros|protein|carbs|carbohydrate|fat\b|vitamin|mineral|sodium|fiber|sugar)\b/.test(
@@ -211,12 +294,52 @@ function heuristicPlan(params: {
       u,
     );
 
+  const wantsNewExercises =
+    /\b(workout\s+ideas?|exercise\s+ideas?|movement\s+ideas?|what\s+should\s+i\s+do\b|what\s+exercises?\b|more\s+(exercises|workouts|movements)|give\s+me\s+(some\s+)?(exercises|workouts|movements))\b/.test(
+      u,
+    ) ||
+    /\bmore\s+(options|ideas)\b/.test(u) ||
+    (exerciseContext && /\b(any|some)\s+ideas\b/.test(u) && !foodLean);
+
   const wantsFullRecipe =
     /\b(recipe\s+for|how\s+(do\s+i|to)\s+make|how\s+to\s+cook|full\s+recipe|ingredients\s+(for|to)|step\s*by\s*step|instructions\s+for|cook\s+this|make\s+this)\b/.test(
       u,
-    ) || /\bwalk\s+me\s+through\b/.test(u);
+    ) ||
+    (/\bwalk\s+me\s+through\b/.test(u) && (foodContext || foodLean) && !exerciseLean);
 
-  if (wantsFullRecipe && !wantsNewRecipes) {
+  const wantsFullExercise =
+    exerciseContext &&
+    !wantsNewExercises &&
+    (/\b(how\s+do\s+i\s+do|how\s+to\s+do|proper\s+form|form\s+for|technique|show\s+me\s+how(\s+to)?\s+do)\b/.test(
+      u,
+    ) ||
+      /\b(full\s+)?(instructions?|breakdown)\s+for\s+(this|that|the\s+(exercise|move))\b/.test(
+        u,
+      ) ||
+      (/\binstructions\s+for\b/.test(u) && !foodLean) ||
+      (/\bwalk\s+me\s+through\b/.test(u) && (exerciseLean || exerciseContext) && !foodLean));
+
+  if (wantsFullExercise) {
+    if (lastExerciseId != null) {
+      return {
+        intent: 'full_exercise',
+        reply: 'Here is how to perform the movement:',
+        ...emptyHints(),
+        fullExerciseId: lastExerciseId,
+        fullExerciseNameHint: null,
+      };
+    }
+    const hint = params.latestUserMessage.trim().slice(0, 120);
+    return {
+      intent: 'full_exercise',
+      reply: 'Here are instructions that match what you asked for:',
+      ...emptyHints(),
+      fullExerciseId: null,
+      fullExerciseNameHint: hint || null,
+    };
+  }
+
+  if (wantsFullRecipe && !wantsNewRecipes && foodContext) {
     if (lastId != null) {
       return {
         intent: 'full_recipe',
@@ -236,7 +359,7 @@ function heuristicPlan(params: {
     };
   }
 
-  if (wantsNutrition && lastId != null && !wantsNewRecipes) {
+  if (wantsNutrition && lastId != null && !wantsNewRecipes && foodContext) {
     return {
       intent: 'nutrition_for_recipe',
       reply: 'Here is a nutrient breakdown for that recipe (per-serving estimate):',
@@ -247,9 +370,31 @@ function heuristicPlan(params: {
   }
 
   if (wantsNewRecipes && foodContext) {
+    if (foodContext && exerciseContext && wantsNewExercises && exerciseLean && !foodLean) {
+      return {
+        intent: 'suggest_exercises',
+        reply: fallbackExerciseAssistIntro(true),
+        ...emptyHints(),
+      };
+    }
     return {
       intent: 'suggest_recipes',
       reply: fallbackQuestAssistIntro(true),
+      ...emptyHints(),
+    };
+  }
+
+  if (wantsNewExercises && exerciseContext) {
+    if (foodContext && exerciseContext && foodLean && !exerciseLean) {
+      return {
+        intent: 'suggest_recipes',
+        reply: fallbackQuestAssistIntro(true),
+        ...emptyHints(),
+      };
+    }
+    return {
+      intent: 'suggest_exercises',
+      reply: fallbackExerciseAssistIntro(true),
       ...emptyHints(),
     };
   }
@@ -271,6 +416,7 @@ export async function planQuestAssistTurn(params: {
   questTitle: string;
   questDescription: string;
   recentRecipes: { id: number; title: string }[];
+  recentExercises: { id: string; name: string }[];
   history: QuestAssistHistoryEntry[];
   latestUserMessage: string;
 }): Promise<QuestAssistPlan> {
@@ -283,6 +429,7 @@ export async function planQuestAssistTurn(params: {
       questDescription: params.questDescription,
       latestUserMessage: params.latestUserMessage,
       recentRecipes: params.recentRecipes,
+      recentExercises: params.recentExercises,
     });
   }
 
@@ -315,6 +462,7 @@ export async function planQuestAssistTurn(params: {
       questDescription: params.questDescription,
       latestUserMessage: params.latestUserMessage,
       recentRecipes: params.recentRecipes,
+      recentExercises: params.recentExercises,
     });
   }
 
@@ -327,6 +475,7 @@ export async function planQuestAssistTurn(params: {
       questDescription: params.questDescription,
       latestUserMessage: params.latestUserMessage,
       recentRecipes: params.recentRecipes,
+      recentExercises: params.recentExercises,
     });
   }
 
@@ -339,6 +488,7 @@ export async function planQuestAssistTurn(params: {
       questDescription: params.questDescription,
       latestUserMessage: params.latestUserMessage,
       recentRecipes: params.recentRecipes,
+      recentExercises: params.recentExercises,
     });
   }
   const content = (choices[0] as { message?: { content?: string } })?.message?.content;
@@ -350,6 +500,7 @@ export async function planQuestAssistTurn(params: {
       questDescription: params.questDescription,
       latestUserMessage: params.latestUserMessage,
       recentRecipes: params.recentRecipes,
+      recentExercises: params.recentExercises,
     });
   }
 
@@ -362,6 +513,7 @@ export async function planQuestAssistTurn(params: {
       questDescription: params.questDescription,
       latestUserMessage: params.latestUserMessage,
       recentRecipes: params.recentRecipes,
+      recentExercises: params.recentExercises,
     });
   }
   return parsed;

@@ -7,7 +7,7 @@ const appJson = require('./app.json');
 /**
  * Loads keys from `.env` in Node (config phase) and exposes them in `extra` so
  * the native app can read them via expo-constants when Metro does not inline
- * `process.env` as expected (OpenAI, Supabase, Spoonacular).
+ * `process.env` as expected (OpenAI, Supabase, Spoonacular, RapidAPI).
  */
 module.exports = {
   expo: {
@@ -18,6 +18,7 @@ module.exports = {
       supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL ?? '',
       supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '',
       spoonacularApiKey: process.env.EXPO_PUBLIC_SPOONACULAR_API_KEY ?? '',
+      rapidApiKey: process.env.EXPO_PUBLIC_RAPIDAPI_KEY ?? '',
     },
   },
 };

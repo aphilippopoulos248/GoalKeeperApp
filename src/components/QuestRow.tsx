@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import type { AssistFullExercise } from '../services/exerciseDbRapidApi';
 import type { AssistFullRecipe } from '../services/spoonacularRecipes';
 import { Quest } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -15,6 +16,8 @@ type QuestRowProps = {
   onAssistPress?: () => void;
   /** Recipe the user saved from AI Assist for this quest. */
   attachedRecipe?: AssistFullRecipe;
+  /** Exercise the user saved from AI Assist for this quest. */
+  attachedExercise?: AssistFullExercise;
 };
 
 export function QuestRow({
@@ -24,6 +27,7 @@ export function QuestRow({
   variant = 'default',
   onAssistPress,
   attachedRecipe,
+  attachedExercise,
 }: QuestRowProps) {
   const { colors } = useAppTheme();
   const isInCard = variant === 'inCard';
@@ -96,6 +100,35 @@ export function QuestRow({
                   numberOfLines={1}
                 >
                   {attachedRecipe.title}
+                </Text>
+              </View>
+            </View>
+          ) : null}
+          {attachedExercise ? (
+            <View
+              style={[
+                styles.savedRecipeRow,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              {attachedExercise.gifUrl ? (
+                <Image
+                  source={{ uri: attachedExercise.gifUrl }}
+                  style={styles.savedRecipeThumb}
+                />
+              ) : null}
+              <View style={styles.savedRecipeCopy}>
+                <View style={styles.savedRecipeLabelRow}>
+                  <Ionicons name="star" size={14} color={colors.primary} />
+                  <Text style={[styles.savedRecipeLabel, { color: colors.textSecondary }]}>
+                    Saved exercise
+                  </Text>
+                </View>
+                <Text
+                  style={[styles.savedRecipeTitle, { color: colors.text }]}
+                  numberOfLines={1}
+                >
+                  {attachedExercise.name}
                 </Text>
               </View>
             </View>

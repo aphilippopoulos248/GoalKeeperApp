@@ -36,6 +36,11 @@ import type { GoalPriority } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 import {
+  clearAttachedExercise,
+  loadAllAttachedExercises,
+  type QuestAttachedExerciseMap,
+} from '../lib/questAttachedExerciseStorage';
+import {
   loadAllAttachedRecipes,
   type QuestAttachedRecipeMap,
 } from '../lib/questAttachedRecipeStorage';
@@ -103,14 +108,31 @@ export function MenuScreen() {
   const [debugClearingAiMemory, setDebugClearingAiMemory] = useState(false);
   const [debugAdvancingDay, setDebugAdvancingDay] = useState(false);
   const [attachedByQuest, setAttachedByQuest] = useState<QuestAttachedRecipeMap>({});
+  const [attachedExerciseByQuest, setAttachedExerciseByQuest] =
+    useState<QuestAttachedExerciseMap>({});
 
   useFocusEffect(
     useCallback(() => {
       if (!userId) {
         setAttachedByQuest({});
+        setAttachedExerciseByQuest({});
         return;
       }
-      void loadAllAttachedRecipes(userId).then(setAttachedByQuest);
+      void (async () => {
+        const recipes = await loadAllAttachedRecipes(userId);
+        let exercises = await loadAllAttachedExercises(userId);
+        for (const gid of Object.keys(recipes)) {
+          const rq = recipes[gid];
+          const eq = exercises[gid];
+          if (!rq || !eq) continue;
+          for (const qid of Object.keys(rq)) {
+            if (qid in eq) await clearAttachedExercise(userId, gid, qid);
+          }
+        }
+        exercises = await loadAllAttachedExercises(userId);
+        setAttachedByQuest(recipes);
+        setAttachedExerciseByQuest(exercises);
+      })();
     }, [userId]),
   );
   const {
@@ -586,6 +608,7 @@ export function MenuScreen() {
           completed={!!completed[entry.quest.id]}
           onToggle={() => toggleQuest(entry.quest.id)}
           attachedRecipe={attachedByQuest[entry.goalId]?.[entry.quest.id]}
+          attachedExercise={attachedExerciseByQuest[entry.goalId]?.[entry.quest.id]}
           onAssistPress={() =>
             navigation.navigate('QuestAssist', {
               goalId: entry.goalId,
@@ -595,7 +618,7 @@ export function MenuScreen() {
         />
       </View>
     ),
-    [attachedByQuest, colors, completed, navigation, toggleQuest],
+    [attachedByQuest, attachedExerciseByQuest, colors, completed, navigation, toggleQuest],
   );
 
   const listHeader = useMemo(

@@ -21,10 +21,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { MainStackParamList } from '../navigation/MainStack';
 import {
   fallbackChatOnlyReply,
+  fallbackExerciseAssistIntro,
   fallbackQuestAssistIntro,
   planQuestAssistTurn,
   type QuestAssistHistoryEntry,
 } from '../services/questAssistOpenai';
+import {
+  fetchExerciseSuggestionsForAssist,
+  fetchFullExerciseInformation,
+  resolveAssistFullExerciseId,
+  searchExerciseIdByName,
+  type AssistExercise,
+  type AssistFullExercise,
+} from '../services/exerciseDbRapidApi';
 import {
   fetchFullRecipeInformation,
   fetchRecipeNutritionSummary,
@@ -34,6 +43,11 @@ import {
   type AssistFullRecipe,
   type AssistRecipe,
 } from '../services/spoonacularRecipes';
+import {
+  clearAttachedExercise,
+  getAttachedExercise,
+  setAttachedExercise,
+} from '../lib/questAttachedExerciseStorage';
 import {
   clearAttachedRecipe,
   getAttachedRecipe,
@@ -59,6 +73,8 @@ type ChatMessage =
       text: string;
       recipes?: AssistRecipe[];
       fullRecipe?: AssistFullRecipe;
+      exercises?: AssistExercise[];
+      fullExercise?: AssistFullExercise;
     };
 
 function extractRecentRecipesFromMessages(messages: ChatMessage[]): {
@@ -80,6 +96,25 @@ function extractRecentRecipesFromMessages(messages: ChatMessage[]): {
   return out;
 }
 
+function extractRecentExercisesFromMessages(messages: ChatMessage[]): {
+  id: string;
+  name: string;
+}[] {
+  const out: { id: string; name: string }[] = [];
+  for (const m of messages) {
+    if (m.role !== 'assistant') continue;
+    if ('exercises' in m && m.exercises?.length) {
+      for (const ex of m.exercises) {
+        out.push({ id: ex.id, name: ex.name });
+      }
+    }
+    if ('fullExercise' in m && m.fullExercise) {
+      out.push({ id: m.fullExercise.id, name: m.fullExercise.name });
+    }
+  }
+  return out;
+}
+
 function toPlannerHistory(messages: ChatMessage[]): QuestAssistHistoryEntry[] {
   return messages.map((m) => {
     if (m.role === 'user') {
@@ -91,7 +126,20 @@ function toPlannerHistory(messages: ChatMessage[]): QuestAssistHistoryEntry[] {
         : undefined;
     const fullRecipeSpoonacularId =
       'fullRecipe' in m && m.fullRecipe ? m.fullRecipe.spoonacularId : undefined;
-    return { role: 'assistant', text: m.text, recipeIds: ids, fullRecipeSpoonacularId };
+    const exerciseIds =
+      'exercises' in m && m.exercises?.length
+        ? m.exercises.map((ex) => ex.id)
+        : undefined;
+    const fullExerciseId =
+      'fullExercise' in m && m.fullExercise ? m.fullExercise.id : undefined;
+    return {
+      role: 'assistant',
+      text: m.text,
+      recipeIds: ids,
+      fullRecipeSpoonacularId,
+      exerciseIds,
+      fullExerciseId,
+    };
   });
 }
 
@@ -102,7 +150,11 @@ export function QuestAssistScreen() {
   const route = useRoute<RouteProp<MainStackParamList, 'QuestAssist'>>();
   const { goalId, questId } = route.params;
   const { goals } = useActiveGoals();
-  const [savedToQuest, setSavedToQuest] = useState<AssistFullRecipe | null>(null);
+  const [savedRecipeToQuest, setSavedRecipeToQuest] = useState<AssistFullRecipe | null>(
+    null,
+  );
+  const [savedExerciseToQuest, setSavedExerciseToQuest] =
+    useState<AssistFullExercise | null>(null);
 
   const goal = useMemo(
     () => goals.find((g) => g.id === goalId),
@@ -131,13 +183,26 @@ export function QuestAssistScreen() {
 
   useEffect(() => {
     if (!userId || !goal || !quest) {
-      setSavedToQuest(null);
+      setSavedRecipeToQuest(null);
+      setSavedExerciseToQuest(null);
       return;
     }
     let cancelled = false;
     void (async () => {
-      const r = await getAttachedRecipe(userId, goal.id, quest.id);
-      if (!cancelled) setSavedToQuest(r);
+      const [r, ex] = await Promise.all([
+        getAttachedRecipe(userId, goal.id, quest.id),
+        getAttachedExercise(userId, goal.id, quest.id),
+      ]);
+      if (!cancelled) {
+        if (r && ex) {
+          await clearAttachedExercise(userId, goal.id, quest.id);
+          setSavedRecipeToQuest(r);
+          setSavedExerciseToQuest(null);
+        } else {
+          setSavedRecipeToQuest(r);
+          setSavedExerciseToQuest(ex);
+        }
+      }
     })();
     return () => {
       cancelled = true;
@@ -213,6 +278,7 @@ export function QuestAssistScreen() {
       const userMessage = last.text;
       const prior = allMessages.slice(0, -1);
       const recentRecipes = extractRecentRecipesFromMessages(prior);
+      const recentExercises = extractRecentExercisesFromMessages(prior);
       const history = toPlannerHistory(prior);
 
       const plan = await planQuestAssistTurn({
@@ -222,12 +288,15 @@ export function QuestAssistScreen() {
         questTitle: quest.title,
         questDescription: quest.description,
         recentRecipes,
+        recentExercises,
         history,
         latestUserMessage: userMessage,
       });
 
       let recipes: AssistRecipe[] | undefined;
       let fullRecipe: AssistFullRecipe | undefined;
+      let exercises: AssistExercise[] | undefined;
+      let fullExercise: AssistFullExercise | undefined;
       let text = plan.reply.trim();
 
       if (plan.intent === 'suggest_recipes') {
@@ -278,6 +347,36 @@ export function QuestAssistScreen() {
             text ||
             "I couldn’t load nutrition for that dish. Try naming the recipe, or pick one from the list above again.";
         }
+      } else if (plan.intent === 'suggest_exercises') {
+        const list = await fetchExerciseSuggestionsForAssist({
+          goalTitle: goal.title,
+          goalDescription: goal.description,
+          goalTimeBound: goal.timeBound,
+          questTitle: quest.title,
+          questDescription: quest.description,
+          userMessage,
+        });
+        exercises = list ?? undefined;
+        if (!text) text = fallbackExerciseAssistIntro(!!exercises?.length);
+      } else if (plan.intent === 'full_exercise') {
+        let eid = resolveAssistFullExerciseId({
+          explicitId: plan.fullExerciseId,
+          nameHint: plan.fullExerciseNameHint,
+          recentExercises,
+          userMessage,
+        });
+        if (eid == null && plan.fullExerciseNameHint?.trim()) {
+          eid = await searchExerciseIdByName(plan.fullExerciseNameHint.trim());
+        }
+        const full = eid != null ? await fetchFullExerciseInformation(eid) : null;
+        if (full) {
+          fullExercise = full;
+          if (!text) text = 'Here is how to perform the movement:';
+        } else {
+          text =
+            text ||
+            "I couldn’t load that exercise. Try a name from the list above or be more specific.";
+        }
       } else if (!text) {
         text = fallbackChatOnlyReply();
       }
@@ -288,6 +387,8 @@ export function QuestAssistScreen() {
         text,
         recipes,
         fullRecipe,
+        exercises,
+        fullExercise,
       };
       setMessages([...allMessages, assistantMsg]);
     },
@@ -297,15 +398,31 @@ export function QuestAssistScreen() {
   const onRecipeStarPress = useCallback(
     async (recipe: AssistFullRecipe) => {
       if (!userId || !goal || !quest) return;
-      if (savedToQuest?.spoonacularId === recipe.spoonacularId) {
+      if (savedRecipeToQuest?.spoonacularId === recipe.spoonacularId) {
         await clearAttachedRecipe(userId, goal.id, quest.id);
-        setSavedToQuest(null);
+        setSavedRecipeToQuest(null);
       } else {
         await setAttachedRecipe(userId, goal.id, quest.id, recipe);
-        setSavedToQuest(recipe);
+        setSavedRecipeToQuest(recipe);
+        setSavedExerciseToQuest(null);
       }
     },
-    [userId, goal, quest, savedToQuest],
+    [userId, goal, quest, savedRecipeToQuest],
+  );
+
+  const onExerciseStarPress = useCallback(
+    async (exercise: AssistFullExercise) => {
+      if (!userId || !goal || !quest) return;
+      if (savedExerciseToQuest?.id === exercise.id) {
+        await clearAttachedExercise(userId, goal.id, quest.id);
+        setSavedExerciseToQuest(null);
+      } else {
+        await setAttachedExercise(userId, goal.id, quest.id, exercise);
+        setSavedExerciseToQuest(exercise);
+        setSavedRecipeToQuest(null);
+      }
+    },
+    [userId, goal, quest, savedExerciseToQuest],
   );
 
   const onSend = useCallback(async () => {
@@ -470,14 +587,14 @@ export function QuestAssistScreen() {
                         style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
                         accessibilityRole="button"
                         accessibilityLabel={
-                          savedToQuest?.spoonacularId === msg.fullRecipe.spoonacularId
+                          savedRecipeToQuest?.spoonacularId === msg.fullRecipe.spoonacularId
                             ? 'Remove recipe from quest'
                             : 'Save recipe to quest'
                         }
                       >
                         <Ionicons
                           name={
-                            savedToQuest?.spoonacularId === msg.fullRecipe.spoonacularId
+                            savedRecipeToQuest?.spoonacularId === msg.fullRecipe.spoonacularId
                               ? 'star'
                               : 'star-outline'
                           }
@@ -549,6 +666,119 @@ export function QuestAssistScreen() {
                         </Text>
                       </Pressable>
                     ) : null}
+                  </View>
+                ) : null}
+                {msg.role === 'assistant' && msg.exercises && msg.exercises.length > 0 ? (
+                  <View style={styles.exerciseList}>
+                    {msg.exercises.map((ex) => (
+                      <View
+                        key={`${msg.id}-${ex.id}`}
+                        style={[
+                          styles.exerciseCard,
+                          {
+                            backgroundColor: colors.surfaceElevated,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        {ex.gifUrl ? (
+                          <Image
+                            source={{ uri: ex.gifUrl }}
+                            style={styles.exerciseImage}
+                          />
+                        ) : null}
+                        <Text
+                          style={[styles.exerciseTitle, { color: colors.text }]}
+                          numberOfLines={2}
+                        >
+                          {ex.name}
+                        </Text>
+                        <Text
+                          style={[styles.exerciseMeta, { color: colors.textSecondary }]}
+                          numberOfLines={2}
+                        >
+                          {[ex.bodyPart, ex.target, ex.equipment].filter(Boolean).join(' · ')}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+                {msg.role === 'assistant' && 'fullExercise' in msg && msg.fullExercise ? (
+                  <View
+                    style={[
+                      styles.fullExerciseCard,
+                      {
+                        backgroundColor: colors.surfaceElevated,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.fullExerciseHeader}>
+                      <Text
+                        style={[styles.fullExerciseHeadline, { color: colors.text }]}
+                        numberOfLines={2}
+                      >
+                        {msg.fullExercise.name}
+                      </Text>
+                      <Pressable
+                        onPress={() => void onExerciseStarPress(msg.fullExercise!)}
+                        hitSlop={12}
+                        style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          savedExerciseToQuest?.id === msg.fullExercise.id
+                            ? 'Remove exercise from quest'
+                            : 'Save exercise to quest'
+                        }
+                      >
+                        <Ionicons
+                          name={
+                            savedExerciseToQuest?.id === msg.fullExercise.id
+                              ? 'star'
+                              : 'star-outline'
+                          }
+                          size={26}
+                          color={colors.primary}
+                        />
+                      </Pressable>
+                    </View>
+                    {msg.fullExercise.gifUrl ? (
+                      <Image
+                        source={{ uri: msg.fullExercise.gifUrl }}
+                        style={styles.fullExerciseHero}
+                      />
+                    ) : null}
+                    {msg.fullExercise.description ? (
+                      <Text
+                        style={[styles.fullExerciseDescription, { color: colors.textSecondary }]}
+                      >
+                        {msg.fullExercise.description}
+                      </Text>
+                    ) : null}
+                    <Text style={[styles.fullRecipeSectionLabel, { color: colors.text }]}>
+                      Steps
+                    </Text>
+                    <ScrollView
+                      nestedScrollEnabled
+                      style={styles.fullExerciseScroll}
+                      showsVerticalScrollIndicator
+                    >
+                      {msg.fullExercise.instructions.length > 0 ? (
+                        msg.fullExercise.instructions.map((line, i) => (
+                          <Text
+                            key={`ex-${msg.id}-${i}`}
+                            style={[styles.fullRecipeLine, { color: colors.text }]}
+                          >
+                            {i + 1}. {line}
+                          </Text>
+                        ))
+                      ) : (
+                        <Text style={[styles.fullRecipeLine, { color: colors.textSecondary }]}>
+                          No written steps in the database for this movement—try a short video
+                          search for a demo.
+                        </Text>
+                      )}
+                    </ScrollView>
                   </View>
                 ) : null}
               </View>
@@ -739,6 +969,66 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginBottom: spacing.xs,
+  },
+  exerciseList: {
+    marginTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  exerciseCard: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    overflow: 'hidden',
+    paddingBottom: spacing.sm,
+  },
+  exerciseImage: {
+    width: '100%',
+    height: 140,
+    backgroundColor: '#e8e8e8',
+  },
+  exerciseTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginHorizontal: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  exerciseMeta: {
+    fontSize: 13,
+    marginHorizontal: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  fullExerciseCard: {
+    marginTop: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: spacing.md,
+    maxHeight: 420,
+  },
+  fullExerciseHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  fullExerciseHeadline: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  fullExerciseHero: {
+    width: '100%',
+    height: 160,
+    borderRadius: radius.sm,
+    marginBottom: spacing.sm,
+    backgroundColor: '#e8e8e8',
+  },
+  fullExerciseDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: spacing.sm,
+  },
+  fullExerciseScroll: {
+    maxHeight: 220,
   },
   composer: {
     flexDirection: 'row',

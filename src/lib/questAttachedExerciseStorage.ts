@@ -1,29 +1,29 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { AssistFullRecipe } from '../services/spoonacularRecipes';
+import type { AssistFullExercise } from '../services/exerciseDbRapidApi';
 
-const keyForUser = (userId: string) => `@goalkeeper/quest-attached-recipes/${userId}`;
+const keyForUser = (userId: string) => `@goalkeeper/quest-attached-exercises/${userId}`;
 
 function guardUser(userId: string | null): userId is string {
   return typeof userId === 'string' && userId.length > 0;
 }
 
-/** goalId -> questId -> recipe */
-export type QuestAttachedRecipeMap = Record<string, Record<string, AssistFullRecipe>>;
+/** goalId -> questId -> exercise */
+export type QuestAttachedExerciseMap = Record<string, Record<string, AssistFullExercise>>;
 
-async function readMap(userId: string): Promise<QuestAttachedRecipeMap> {
+async function readMap(userId: string): Promise<QuestAttachedExerciseMap> {
   try {
     const raw = await AsyncStorage.getItem(keyForUser(userId));
     if (!raw) return {};
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return parsed as QuestAttachedRecipeMap;
+    return parsed as QuestAttachedExerciseMap;
   } catch {
     return {};
   }
 }
 
-async function writeMap(userId: string, map: QuestAttachedRecipeMap): Promise<void> {
+async function writeMap(userId: string, map: QuestAttachedExerciseMap): Promise<void> {
   try {
     await AsyncStorage.setItem(keyForUser(userId), JSON.stringify(map));
   } catch {
@@ -31,18 +31,18 @@ async function writeMap(userId: string, map: QuestAttachedRecipeMap): Promise<vo
   }
 }
 
-export async function loadAllAttachedRecipes(
+export async function loadAllAttachedExercises(
   userId: string | null,
-): Promise<QuestAttachedRecipeMap> {
+): Promise<QuestAttachedExerciseMap> {
   if (!guardUser(userId)) return {};
   return readMap(userId);
 }
 
-export async function getAttachedRecipe(
+export async function getAttachedExercise(
   userId: string | null,
   goalId: string,
   questId: string,
-): Promise<AssistFullRecipe | null> {
+): Promise<AssistFullExercise | null> {
   if (!guardUser(userId)) return null;
   const map = await readMap(userId);
   const g = map[goalId];
@@ -51,21 +51,21 @@ export async function getAttachedRecipe(
   return r ?? null;
 }
 
-export async function setAttachedRecipe(
+export async function setAttachedExercise(
   userId: string | null,
   goalId: string,
   questId: string,
-  recipe: AssistFullRecipe,
+  exercise: AssistFullExercise,
 ): Promise<void> {
   if (!guardUser(userId)) return;
-  const { clearAttachedExercise } = await import('./questAttachedExerciseStorage');
-  await clearAttachedExercise(userId, goalId, questId);
+  const { clearAttachedRecipe } = await import('./questAttachedRecipeStorage');
+  await clearAttachedRecipe(userId, goalId, questId);
   const map = await readMap(userId);
-  const next = { ...map, [goalId]: { ...map[goalId], [questId]: recipe } };
+  const next = { ...map, [goalId]: { ...map[goalId], [questId]: exercise } };
   await writeMap(userId, next);
 }
 
-export async function clearAttachedRecipe(
+export async function clearAttachedExercise(
   userId: string | null,
   goalId: string,
   questId: string,
@@ -84,7 +84,7 @@ export async function clearAttachedRecipe(
   await writeMap(userId, next);
 }
 
-export async function clearAttachedRecipesForGoal(
+export async function clearAttachedExercisesForGoal(
   userId: string | null,
   goalId: string,
 ): Promise<void> {

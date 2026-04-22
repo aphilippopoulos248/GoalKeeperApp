@@ -44,6 +44,7 @@ import {
 } from '../utils/dailyQuestSchedule';
 import { dailyQuestCountForPriority, parseGoalPriority } from '../utils/goalPriority';
 
+import { clearAttachedExercisesForGoal } from '../lib/questAttachedExerciseStorage';
 import { clearAttachedRecipesForGoal } from '../lib/questAttachedRecipeStorage';
 
 import { useAuthUser } from './AuthUserContext';
@@ -419,7 +420,10 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
               .map((q) => ({ title: q.title, description: q.description })),
             userProgressJournal: journalContextForAiRef.current.trim() || undefined,
           });
-          if (userId) void clearAttachedRecipesForGoal(userId, snapshot.id);
+          if (userId) {
+            void clearAttachedRecipesForGoal(userId, snapshot.id);
+            void clearAttachedExercisesForGoal(userId, snapshot.id);
+          }
           const regenBatch = Date.now();
           setGoals((cur) =>
             cur.map((goal) => {
@@ -610,7 +614,10 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
           scheduleStartMinute: q.startMinute,
           scheduleDurationMinutes: q.durationMinutes,
         }));
-        if (userId) void clearAttachedRecipesForGoal(userId, goal.id);
+        if (userId) {
+          void clearAttachedRecipesForGoal(userId, goal.id);
+          void clearAttachedExercisesForGoal(userId, goal.id);
+        }
         working = working.map((g) =>
           g.id === goal.id ? { ...g, dailyQuests: newDailies } : g,
         );
@@ -674,7 +681,10 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
           sortedDailies,
           dailyQuestsRaw,
         );
-        if (userId) void clearAttachedRecipesForGoal(userId, goal.id);
+        if (userId) {
+          void clearAttachedRecipesForGoal(userId, goal.id);
+          void clearAttachedExercisesForGoal(userId, goal.id);
+        }
         working = working.map((g) =>
           g.id === goal.id ? { ...g, dailyQuests: newDailies } : g,
         );
@@ -735,7 +745,10 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
           sortedDailies,
           dailyQuestsRaw,
         );
-        if (userId) void clearAttachedRecipesForGoal(userId, goal.id);
+        if (userId) {
+          void clearAttachedRecipesForGoal(userId, goal.id);
+          void clearAttachedExercisesForGoal(userId, goal.id);
+        }
         working = working.map((g) =>
           g.id === goal.id ? { ...g, dailyQuests: newDailies } : g,
         );

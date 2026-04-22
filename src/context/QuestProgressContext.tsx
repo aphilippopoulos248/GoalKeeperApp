@@ -17,6 +17,7 @@ import {
 } from '../services/supabase/questProgressRepository';
 import { fetchWeeklyQuestsForUser } from '../services/supabase/weeklyQuestsRepository';
 import type { Quest } from '../types';
+import { clearAttachedExercise } from '../lib/questAttachedExerciseStorage';
 import { clearAttachedRecipe } from '../lib/questAttachedRecipeStorage';
 import { resolveQuestScheduleBlock } from '../utils/dailyQuestSchedule';
 
@@ -167,6 +168,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
         if (userId && entry?.goalId) void upsertQuestCompletion(userId, id, nextCompleted);
         if (nextCompleted && userId && entry?.goalId && quest.kind === 'daily') {
           void clearAttachedRecipe(userId, entry.goalId, id);
+          void clearAttachedExercise(userId, entry.goalId, id);
         }
         applyQuestToggle(quest, nextCompleted);
       });
