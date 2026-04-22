@@ -1,8 +1,8 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getItemScopedWithLegacyMigrate, setItemScoped } from '../lib/userScopedStorage';
 
 import type { ReservedScheduleSlot } from './openaiGoalPlanner';
 
-const LIFE_SCHEDULE_SLOTS_KEY = '@goalkeeper/life-schedule-slots-v1';
+const LIFE_SCHEDULE_SLOTS_BASE_KEY = '@goalkeeper/life-schedule-slots-v1';
 
 function normalizeSlot(s: ReservedScheduleSlot): ReservedScheduleSlot | null {
   const start = Math.min(1439, Math.max(0, Math.round(s.startMinute)));
@@ -11,9 +11,11 @@ function normalizeSlot(s: ReservedScheduleSlot): ReservedScheduleSlot | null {
   return { startMinute: start, endMinute: end };
 }
 
-export async function loadLifeScheduleSlots(): Promise<ReservedScheduleSlot[]> {
+export async function loadLifeScheduleSlots(
+  userId: string | null,
+): Promise<ReservedScheduleSlot[]> {
   try {
-    const raw = await AsyncStorage.getItem(LIFE_SCHEDULE_SLOTS_KEY);
+    const raw = await getItemScopedWithLegacyMigrate(LIFE_SCHEDULE_SLOTS_BASE_KEY, userId);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -34,10 +36,11 @@ export async function loadLifeScheduleSlots(): Promise<ReservedScheduleSlot[]> {
 }
 
 export async function saveLifeScheduleSlots(
+  userId: string | null,
   slots: ReservedScheduleSlot[],
 ): Promise<void> {
   const normalized = slots
     .map((s) => normalizeSlot(s))
     .filter((x): x is ReservedScheduleSlot => x != null);
-  await AsyncStorage.setItem(LIFE_SCHEDULE_SLOTS_KEY, JSON.stringify(normalized));
+  await setItemScoped(LIFE_SCHEDULE_SLOTS_BASE_KEY, userId, JSON.stringify(normalized));
 }

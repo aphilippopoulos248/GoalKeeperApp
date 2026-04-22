@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, {
   createContext,
   useCallback,
@@ -10,6 +9,7 @@ import React, {
 } from 'react';
 
 import { SEED_ACTIVE_GOALS } from '../data/mockGoal';
+import { getItemScopedWithLegacyMigrate, setItemScoped } from '../lib/userScopedStorage';
 import { loadLifeScheduleSlots, saveLifeScheduleSlots } from '../services/lifeScheduleSlots';
 import {
   parseLifeBusySlotsFromMessage,
@@ -35,7 +35,9 @@ import {
 } from '../utils/dailyQuestSchedule';
 import { dailyQuestCountForPriority, parseGoalPriority } from '../utils/goalPriority';
 
-const GOALS_STORAGE_KEY = '@goalkeeper/active-goals-v1';
+import { useAuthUser } from './AuthUserContext';
+
+const GOALS_STORAGE_BASE_KEY = '@goalkeeper/active-goals-v1';
 
 export type NewGoalInput = {
   title: string;
@@ -52,6 +54,8 @@ export type AddGoalOptions = {
 
 type ActiveGoalsContextValue = {
   goals: Goal[];
+  /** True after the first load from AsyncStorage (or decision to keep seed data). */
+  goalsStorageReady: boolean;
   addGoal: (input: NewGoalInput, options?: AddGoalOptions) => void;
   getGoalById: (id: string) => Goal | undefined;
   removeGoal: (goalId: string) => void;
@@ -171,9 +175,9 @@ function normalizeGoal(raw: unknown): Goal | null {
   };
 }
 
-async function loadGoalsFromStorage(): Promise<Goal[] | null> {
+async function loadGoalsFromStorage(userId: string | null): Promise<Goal[] | null> {
   try {
-    const raw = await AsyncStorage.getItem(GOALS_STORAGE_KEY);
+    const raw = await getItemScopedWithLegacyMigrate(GOALS_STORAGE_BASE_KEY, userId);
     if (raw === null) return null;
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return null;
@@ -184,8 +188,8 @@ async function loadGoalsFromStorage(): Promise<Goal[] | null> {
   }
 }
 
-async function saveGoalsToStorage(goals: Goal[]): Promise<void> {
-  await AsyncStorage.setItem(GOALS_STORAGE_KEY, JSON.stringify(goals));
+async function saveGoalsToStorage(goals: Goal[], userId: string | null): Promise<void> {
+  await setItemScoped(GOALS_STORAGE_BASE_KEY, userId, JSON.stringify(goals));
 }
 
 function mergeDailyQuestSchedule(
@@ -297,6 +301,7 @@ function buildGoalFromInput(input: NewGoalInput, options?: AddGoalOptions): Goal
 }
 
 export function ActiveGoalsProvider({ children }: { children: React.ReactNode }) {
+  const { userId, authReady } = useAuthUser();
   const [goals, setGoals] = useState<Goal[]>(() => [...SEED_ACTIVE_GOALS]);
   const [storageReady, setStorageReady] = useState(false);
   const [lifeScheduleSlots, setLifeScheduleSlots] = useState<ReservedScheduleSlot[]>([]);
@@ -314,8 +319,10 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
   }, [lifeScheduleSlots]);
 
   useEffect(() => {
+    if (!authReady) return;
+    lifeSlotsHydrated.current = false;
     let cancelled = false;
-    void loadLifeScheduleSlots().then((slots) => {
+    void loadLifeScheduleSlots(userId).then((slots) => {
       if (cancelled) return;
       setLifeScheduleSlots(slots);
       lifeScheduleSlotsRef.current = slots;
@@ -324,32 +331,32 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [userId, authReady]);
 
   useEffect(() => {
-    if (!lifeSlotsHydrated.current) return;
-    void saveLifeScheduleSlots(lifeScheduleSlots);
-  }, [lifeScheduleSlots]);
+    if (!authReady || !lifeSlotsHydrated.current) return;
+    void saveLifeScheduleSlots(userId, lifeScheduleSlots);
+  }, [lifeScheduleSlots, authReady, userId]);
 
   useEffect(() => {
+    if (!authReady) return;
     let cancelled = false;
-    (async () => {
-      const loaded = await loadGoalsFromStorage();
+    setStorageReady(false);
+    void (async () => {
+      const loaded = await loadGoalsFromStorage(userId);
       if (cancelled) return;
-      if (loaded !== null) {
-        setGoals(loaded);
-      }
+      setGoals(loaded !== null ? loaded : [...SEED_ACTIVE_GOALS]);
       setStorageReady(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [userId, authReady]);
 
   useEffect(() => {
-    if (!storageReady) return;
-    void saveGoalsToStorage(goals);
-  }, [goals, storageReady]);
+    if (!authReady || !storageReady) return;
+    void saveGoalsToStorage(goals, userId);
+  }, [goals, storageReady, authReady, userId]);
 
   useEffect(() => {
     if (!storageReady) return;
@@ -557,6 +564,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
   const value = useMemo(
     () => ({
       goals,
+      goalsStorageReady: storageReady,
       addGoal,
       getGoalById,
       removeGoal,
@@ -568,6 +576,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     }),
     [
       goals,
+      storageReady,
       addGoal,
       getGoalById,
       removeGoal,

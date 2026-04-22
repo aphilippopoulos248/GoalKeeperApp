@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, {
   createContext,
   useCallback,
@@ -10,11 +9,13 @@ import React, {
 } from 'react';
 
 import { mockDailyQuests, mockWeeklyQuests } from '../data/mockQuests';
+import { getItemScopedWithLegacyMigrate, setItemScoped } from '../lib/userScopedStorage';
 import { useDailyStreakAndPointsToday } from '../hooks/useDailyStreakAndPointsToday';
 import type { Quest } from '../types';
 import { resolveQuestScheduleBlock } from '../utils/dailyQuestSchedule';
 
 import { useActiveGoals } from './ActiveGoalsContext';
+import { useAuthUser } from './AuthUserContext';
 
 const MINUTES_PER_DAY = 24 * 60;
 
@@ -31,8 +32,8 @@ function compareDailyEntriesByScheduleTime(a: DailyQuestEntry, b: DailyQuestEntr
   return a.quest.id.localeCompare(b.quest.id);
 }
 
-const QUEST_COMPLETED_KEY = '@goalkeeper/quest-completed-v1';
-const GOAL_BAR_EARNED_KEY = '@goalkeeper/goal-bar-earned-v1';
+const QUEST_COMPLETED_BASE_KEY = '@goalkeeper/quest-completed-v1';
+const GOAL_BAR_EARNED_BASE_KEY = '@goalkeeper/goal-bar-earned-v1';
 
 export type DailyQuestEntry = {
   goalId: string;
@@ -56,9 +57,9 @@ type QuestProgressValue = {
 
 const QuestProgressContext = createContext<QuestProgressValue | null>(null);
 
-async function loadCompleted(): Promise<Record<string, boolean>> {
+async function loadCompleted(userId: string | null): Promise<Record<string, boolean>> {
   try {
-    const raw = await AsyncStorage.getItem(QUEST_COMPLETED_KEY);
+    const raw = await getItemScopedWithLegacyMigrate(QUEST_COMPLETED_BASE_KEY, userId);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== 'object') return {};
@@ -72,13 +73,16 @@ async function loadCompleted(): Promise<Record<string, boolean>> {
   }
 }
 
-async function saveCompleted(map: Record<string, boolean>): Promise<void> {
-  await AsyncStorage.setItem(QUEST_COMPLETED_KEY, JSON.stringify(map));
+async function saveCompleted(
+  userId: string | null,
+  map: Record<string, boolean>,
+): Promise<void> {
+  await setItemScoped(QUEST_COMPLETED_BASE_KEY, userId, JSON.stringify(map));
 }
 
-async function loadGoalBarEarned(): Promise<Record<string, number>> {
+async function loadGoalBarEarned(userId: string | null): Promise<Record<string, number>> {
   try {
-    const raw = await AsyncStorage.getItem(GOAL_BAR_EARNED_KEY);
+    const raw = await getItemScopedWithLegacyMigrate(GOAL_BAR_EARNED_BASE_KEY, userId);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== 'object') return {};
@@ -92,14 +96,18 @@ async function loadGoalBarEarned(): Promise<Record<string, number>> {
   }
 }
 
-async function saveGoalBarEarned(map: Record<string, number>): Promise<void> {
-  await AsyncStorage.setItem(GOAL_BAR_EARNED_KEY, JSON.stringify(map));
+async function saveGoalBarEarned(
+  userId: string | null,
+  map: Record<string, number>,
+): Promise<void> {
+  await setItemScoped(GOAL_BAR_EARNED_BASE_KEY, userId, JSON.stringify(map));
 }
 
 export function QuestProgressProvider({ children }: { children: React.ReactNode }) {
+  const { userId, authReady } = useAuthUser();
   const { goals } = useActiveGoals();
   const { streak, pointsToday, lifetimeQuestPoints, applyQuestToggle } =
-    useDailyStreakAndPointsToday();
+    useDailyStreakAndPointsToday(userId, authReady);
   const [completed, setCompleted] = useState<Record<string, boolean>>({});
   const [goalBarEarned, setGoalBarEarned] = useState<Record<string, number>>({});
   const completedRef = useRef<Record<string, boolean>>({});
@@ -142,9 +150,13 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
   );
 
   useEffect(() => {
+    if (!authReady) return;
     let cancelled = false;
     (async () => {
-      const [cMap, eMap] = await Promise.all([loadCompleted(), loadGoalBarEarned()]);
+      const [cMap, eMap] = await Promise.all([
+        loadCompleted(userId),
+        loadGoalBarEarned(userId),
+      ]);
       if (!cancelled) {
         setCompleted(cMap);
         setGoalBarEarned(eMap);
@@ -153,7 +165,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [userId, authReady]);
 
   const toggleQuest = useCallback(
     (id: string) => {
@@ -173,17 +185,17 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
           const nextEarned = { ...prevEarned };
           const cur = nextEarned[entry.goalId] ?? 0;
           nextEarned[entry.goalId] = Math.max(0, cur + delta);
-          queueMicrotask(() => void saveGoalBarEarned(nextEarned));
+          queueMicrotask(() => void saveGoalBarEarned(userId, nextEarned));
           return nextEarned;
         });
       }
 
       queueMicrotask(() => {
-        void saveCompleted(nextMap);
+        void saveCompleted(userId, nextMap);
         applyQuestToggle(quest, nextCompleted);
       });
     },
-    [allQuestsForToggle, applyQuestToggle, dailyQuestEntries],
+    [allQuestsForToggle, applyQuestToggle, dailyQuestEntries, userId],
   );
 
   const questsCompletedCount = useMemo(

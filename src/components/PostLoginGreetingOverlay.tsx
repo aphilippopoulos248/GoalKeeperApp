@@ -1,23 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, type ViewStyle } from 'react-native';
+import {
+  ActivityIndicator,
+  Animated,
+  StyleSheet,
+  Text,
+  View,
+  type ViewStyle,
+} from 'react-native';
 
 import { useAppTheme } from '../theme/ThemeProvider';
 import { spacing } from '../theme/spacing';
 
-const TYPE_MS = 42;
-const HOLD_MS = 800;
+const TYPE_MS = 38;
 const ENTER_MS = 320;
 const EXIT_MS = 450;
 
+function holdMsForMessage(message: string): number {
+  return Math.min(2600, 650 + message.length * 11);
+}
+
 type Props = {
   visible: boolean;
-  displayName: string;
+  /** Goals still loading from storage — show a short wait state. */
+  preparing: boolean;
+  message: string;
   onFinished: () => void;
 };
 
 export function PostLoginGreetingOverlay({
   visible,
-  displayName,
+  preparing,
+  message,
   onFinished,
 }: Props) {
   const { colors } = useAppTheme();
@@ -28,7 +41,7 @@ export function PostLoginGreetingOverlay({
   onFinishedRef.current = onFinished;
 
   useEffect(() => {
-    if (!visible) {
+    if (!visible || preparing || !message) {
       setShownText('');
       fade.setValue(0);
       scale.setValue(0.92);
@@ -36,7 +49,6 @@ export function PostLoginGreetingOverlay({
     }
 
     let cancelled = false;
-    const message = `Hello ${displayName}, its nice to see you`;
     setShownText('');
     fade.setValue(0);
     scale.setValue(0.92);
@@ -77,7 +89,7 @@ export function PostLoginGreetingOverlay({
               if (cancelled || !exitFinished) return;
               onFinishedRef.current();
             });
-          }, HOLD_MS);
+          }, holdMsForMessage(message));
         }
       }, TYPE_MS);
     });
@@ -88,7 +100,7 @@ export function PostLoginGreetingOverlay({
       if (typeInterval) clearInterval(typeInterval);
       if (holdTimeout) clearTimeout(holdTimeout);
     };
-  }, [visible, displayName, fade, scale]);
+  }, [visible, preparing, message, fade, scale]);
 
   if (!visible) {
     return null;
@@ -103,6 +115,17 @@ export function PostLoginGreetingOverlay({
     zIndex: 999,
   };
 
+  if (preparing) {
+    return (
+      <View style={backdropStyle} pointerEvents="auto">
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  const fontSize = message.length > 300 ? 16 : message.length > 220 ? 18 : 22;
+  const lineHeight = fontSize + 8;
+
   return (
     <Animated.View
       style={[backdropStyle, { opacity: fade }]}
@@ -110,7 +133,7 @@ export function PostLoginGreetingOverlay({
     >
       <Animated.View style={{ transform: [{ scale }] }}>
         <Text
-          style={[styles.message, { color: colors.text }]}
+          style={[styles.message, { color: colors.text, fontSize, lineHeight }]}
           accessibilityRole="text"
           accessibilityLiveRegion="polite"
         >
@@ -123,9 +146,7 @@ export function PostLoginGreetingOverlay({
 
 const styles = StyleSheet.create({
   message: {
-    fontSize: 22,
     fontWeight: '600',
     textAlign: 'center',
-    lineHeight: 30,
   },
 });

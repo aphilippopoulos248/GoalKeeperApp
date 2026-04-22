@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import { Screen } from '../components/Screen';
+import { setGreetingIntentReturning } from '../lib/greetingIntent';
 import { supabase } from '../lib/supabase';
 import type { RootStackParamList } from '../navigation/RootStack';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -34,6 +35,8 @@ export function LoginScreen({ navigation }: Props) {
       });
       if (error) {
         setErrorMessage(error.message);
+      } else {
+        setGreetingIntentReturning();
       }
     } finally {
       setLoading(false);

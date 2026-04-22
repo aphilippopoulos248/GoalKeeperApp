@@ -1,11 +1,11 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
+import { getItemScopedWithLegacyMigrate, setItemScoped } from '../lib/userScopedStorage';
 import type { Quest } from '../types';
 
-const STREAK_KEY = '@goalkeeper/daily-streak-v1';
-const POINTS_TODAY_KEY = '@goalkeeper/points-today-v1';
-const LIFETIME_QUEST_POINTS_KEY = '@goalkeeper/lifetime-quest-points-v1';
+const STREAK_BASE_KEY = '@goalkeeper/daily-streak-v1';
+const POINTS_TODAY_BASE_KEY = '@goalkeeper/points-today-v1';
+const LIFETIME_QUEST_POINTS_BASE_KEY = '@goalkeeper/lifetime-quest-points-v1';
 
 type StreakPersisted = {
   streak: number;
@@ -30,9 +30,9 @@ function yesterdayString(): string {
   return formatLocalDate(d);
 }
 
-async function loadStreak(): Promise<StreakPersisted> {
+async function loadStreak(userId: string | null): Promise<StreakPersisted> {
   try {
-    const raw = await AsyncStorage.getItem(STREAK_KEY);
+    const raw = await getItemScopedWithLegacyMigrate(STREAK_BASE_KEY, userId);
     if (!raw) return { streak: 0, lastDailyActivityDate: null };
     const parsed = JSON.parse(raw) as StreakPersisted;
     return {
@@ -48,13 +48,13 @@ async function loadStreak(): Promise<StreakPersisted> {
   }
 }
 
-async function saveStreak(data: StreakPersisted): Promise<void> {
-  await AsyncStorage.setItem(STREAK_KEY, JSON.stringify(data));
+async function saveStreak(userId: string | null, data: StreakPersisted): Promise<void> {
+  await setItemScoped(STREAK_BASE_KEY, userId, JSON.stringify(data));
 }
 
-async function loadPointsToday(): Promise<PointsPersisted> {
+async function loadPointsToday(userId: string | null): Promise<PointsPersisted> {
   try {
-    const raw = await AsyncStorage.getItem(POINTS_TODAY_KEY);
+    const raw = await getItemScopedWithLegacyMigrate(POINTS_TODAY_BASE_KEY, userId);
     if (!raw) return { date: formatLocalDate(new Date()), points: 0 };
     const parsed = JSON.parse(raw) as PointsPersisted;
     return {
@@ -66,8 +66,8 @@ async function loadPointsToday(): Promise<PointsPersisted> {
   }
 }
 
-async function savePointsToday(data: PointsPersisted): Promise<void> {
-  await AsyncStorage.setItem(POINTS_TODAY_KEY, JSON.stringify(data));
+async function savePointsToday(userId: string | null, data: PointsPersisted): Promise<void> {
+  await setItemScoped(POINTS_TODAY_BASE_KEY, userId, JSON.stringify(data));
 }
 
 function normalizePointsForToday(stored: PointsPersisted): PointsPersisted {
@@ -78,9 +78,9 @@ function normalizePointsForToday(stored: PointsPersisted): PointsPersisted {
   return stored;
 }
 
-async function loadLifetimeQuestPoints(): Promise<number> {
+async function loadLifetimeQuestPoints(userId: string | null): Promise<number> {
   try {
-    const raw = await AsyncStorage.getItem(LIFETIME_QUEST_POINTS_KEY);
+    const raw = await getItemScopedWithLegacyMigrate(LIFETIME_QUEST_POINTS_BASE_KEY, userId);
     if (!raw) return 0;
     const n = JSON.parse(raw) as unknown;
     return typeof n === 'number' && Number.isFinite(n) ? Math.max(0, n) : 0;
@@ -89,22 +89,26 @@ async function loadLifetimeQuestPoints(): Promise<number> {
   }
 }
 
-async function saveLifetimeQuestPoints(points: number): Promise<void> {
-  await AsyncStorage.setItem(LIFETIME_QUEST_POINTS_KEY, JSON.stringify(points));
+async function saveLifetimeQuestPoints(userId: string | null, points: number): Promise<void> {
+  await setItemScoped(LIFETIME_QUEST_POINTS_BASE_KEY, userId, JSON.stringify(points));
 }
 
-export function useDailyStreakAndPointsToday() {
+export function useDailyStreakAndPointsToday(
+  userId: string | null,
+  authReady: boolean,
+) {
   const [streak, setStreak] = useState(0);
   const [pointsToday, setPointsToday] = useState(0);
   const [lifetimeQuestPoints, setLifetimeQuestPoints] = useState(0);
 
   useEffect(() => {
+    if (!authReady) return;
     let cancelled = false;
-    (async () => {
+    void (async () => {
       const [s, p, lifetime] = await Promise.all([
-        loadStreak(),
-        loadPointsToday(),
-        loadLifetimeQuestPoints(),
+        loadStreak(userId),
+        loadPointsToday(userId),
+        loadLifetimeQuestPoints(userId),
       ]);
       if (cancelled) return;
       setStreak(s.streak);
@@ -112,66 +116,69 @@ export function useDailyStreakAndPointsToday() {
       const normalized = normalizePointsForToday(p);
       setPointsToday(normalized.points);
       if (normalized.points !== p.points || normalized.date !== p.date) {
-        await savePointsToday(normalized);
+        await savePointsToday(userId, normalized);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [userId, authReady]);
 
-  const applyQuestToggle = useCallback((quest: Quest, nowCompleted: boolean) => {
-    const today = formatLocalDate(new Date());
+  const applyQuestToggle = useCallback(
+    (quest: Quest, nowCompleted: boolean) => {
+      const today = formatLocalDate(new Date());
 
-    void (async () => {
-      if (nowCompleted) {
-        const ptsData = normalizePointsForToday(await loadPointsToday());
-        const nextPoints = ptsData.points + quest.points;
-        setPointsToday(nextPoints);
-        await savePointsToday({ date: today, points: nextPoints });
+      void (async () => {
+        if (nowCompleted) {
+          const ptsData = normalizePointsForToday(await loadPointsToday(userId));
+          const nextPoints = ptsData.points + quest.points;
+          setPointsToday(nextPoints);
+          await savePointsToday(userId, { date: today, points: nextPoints });
 
-        const prevLifetime = await loadLifetimeQuestPoints();
-        const nextLifetime = prevLifetime + quest.points;
-        setLifetimeQuestPoints(nextLifetime);
-        await saveLifetimeQuestPoints(nextLifetime);
+          const prevLifetime = await loadLifetimeQuestPoints(userId);
+          const nextLifetime = prevLifetime + quest.points;
+          setLifetimeQuestPoints(nextLifetime);
+          await saveLifetimeQuestPoints(userId, nextLifetime);
 
-        if (quest.kind !== 'daily') return;
+          if (quest.kind !== 'daily') return;
 
-        const cur = await loadStreak();
-        const last = cur.lastDailyActivityDate;
+          const cur = await loadStreak(userId);
+          const last = cur.lastDailyActivityDate;
 
-        if (last === today) {
-          return;
-        }
+          if (last === today) {
+            return;
+          }
 
-        let nextStreak: number;
-        if (last === null) {
-          nextStreak = 1;
-        } else if (last === yesterdayString()) {
-          nextStreak = cur.streak + 1;
+          let nextStreak: number;
+          if (last === null) {
+            nextStreak = 1;
+          } else if (last === yesterdayString()) {
+            nextStreak = cur.streak + 1;
+          } else {
+            nextStreak = 1;
+          }
+
+          const next: StreakPersisted = {
+            streak: nextStreak,
+            lastDailyActivityDate: today,
+          };
+          await saveStreak(userId, next);
+          setStreak(nextStreak);
         } else {
-          nextStreak = 1;
+          const ptsData = normalizePointsForToday(await loadPointsToday(userId));
+          const nextPoints = Math.max(0, ptsData.points - quest.points);
+          setPointsToday(nextPoints);
+          await savePointsToday(userId, { date: today, points: nextPoints });
+
+          const prevLifetime = await loadLifetimeQuestPoints(userId);
+          const nextLifetime = Math.max(0, prevLifetime - quest.points);
+          setLifetimeQuestPoints(nextLifetime);
+          await saveLifetimeQuestPoints(userId, nextLifetime);
         }
-
-        const next: StreakPersisted = {
-          streak: nextStreak,
-          lastDailyActivityDate: today,
-        };
-        await saveStreak(next);
-        setStreak(nextStreak);
-      } else {
-        const ptsData = normalizePointsForToday(await loadPointsToday());
-        const nextPoints = Math.max(0, ptsData.points - quest.points);
-        setPointsToday(nextPoints);
-        await savePointsToday({ date: today, points: nextPoints });
-
-        const prevLifetime = await loadLifetimeQuestPoints();
-        const nextLifetime = Math.max(0, prevLifetime - quest.points);
-        setLifetimeQuestPoints(nextLifetime);
-        await saveLifetimeQuestPoints(nextLifetime);
-      }
-    })();
-  }, []);
+      })();
+    },
+    [userId],
+  );
 
   return { streak, pointsToday, lifetimeQuestPoints, applyQuestToggle };
 }

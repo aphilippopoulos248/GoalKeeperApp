@@ -12,6 +12,12 @@ import {
 import { ActivityIndicator, View } from 'react-native';
 
 import { PostLoginGreetingOverlay } from '../components/PostLoginGreetingOverlay';
+import { useActiveGoals } from '../context/ActiveGoalsContext';
+import { buildGreetingMessage } from '../lib/buildGreetingMessage';
+import {
+  consumeGreetingIntent,
+  type GreetingAccountKind,
+} from '../lib/greetingIntent';
 import { supabase } from '../lib/supabase';
 import { displayNameFromUser } from '../lib/userDisplayName';
 import { LoginScreen } from '../screens/LoginScreen';
@@ -29,6 +35,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 type PostLoginGreetingContextValue = {
   showGreeting: boolean;
+  greetingAccountKind: GreetingAccountKind;
   greetingDisplayName: string;
   onGreetingFinished: () => void;
 };
@@ -41,12 +48,31 @@ function MainShell() {
   if (!ctx) {
     throw new Error('MainShell requires PostLoginGreetingContext');
   }
+  const { goals, goalsStorageReady } = useActiveGoals();
+
+  const preparing = ctx.showGreeting && !goalsStorageReady;
+  const message = useMemo(() => {
+    if (!ctx.showGreeting || !goalsStorageReady) return '';
+    return buildGreetingMessage(
+      ctx.greetingAccountKind,
+      ctx.greetingDisplayName,
+      goals,
+    );
+  }, [
+    ctx.showGreeting,
+    ctx.greetingAccountKind,
+    ctx.greetingDisplayName,
+    goals,
+    goalsStorageReady,
+  ]);
+
   return (
     <View style={{ flex: 1 }}>
       <RootTabs />
       <PostLoginGreetingOverlay
         visible={ctx.showGreeting}
-        displayName={ctx.greetingDisplayName}
+        preparing={preparing}
+        message={message}
         onFinished={ctx.onGreetingFinished}
       />
     </View>
@@ -57,6 +83,8 @@ export function RootStack() {
   const { colors } = useAppTheme();
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [greetingUser, setGreetingUser] = useState<User | null>(null);
+  const [greetingAccountKind, setGreetingAccountKind] =
+    useState<GreetingAccountKind>('returning');
   const [showGreeting, setShowGreeting] = useState(false);
 
   const onGreetingFinished = useCallback(() => {
@@ -71,10 +99,16 @@ export function RootStack() {
   const postLoginGreeting = useMemo(
     () => ({
       showGreeting,
+      greetingAccountKind,
       greetingDisplayName,
       onGreetingFinished,
     }),
-    [showGreeting, greetingDisplayName, onGreetingFinished],
+    [
+      showGreeting,
+      greetingAccountKind,
+      greetingDisplayName,
+      onGreetingFinished,
+    ],
   );
 
   useEffect(() => {
@@ -86,12 +120,15 @@ export function RootStack() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (event === 'SIGNED_IN' && nextSession?.user) {
+        const kind = consumeGreetingIntent() ?? 'returning';
+        setGreetingAccountKind(kind);
         setGreetingUser(nextSession.user);
         setShowGreeting(true);
       }
       if (event === 'SIGNED_OUT') {
         setShowGreeting(false);
         setGreetingUser(null);
+        setGreetingAccountKind('returning');
       }
       setSession(nextSession);
     });

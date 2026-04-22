@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import { Screen } from '../components/Screen';
+import { setGreetingIntentNewAccount } from '../lib/greetingIntent';
 import { supabase } from '../lib/supabase';
 import type { RootStackParamList } from '../navigation/RootStack';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -43,6 +44,7 @@ export function RegisterScreen({ navigation }: Props) {
         return;
       }
       if (data.session) {
+        setGreetingIntentNewAccount();
         return;
       }
       setSuccessMessage(
