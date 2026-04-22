@@ -3,6 +3,19 @@ export type GoalPriority = 'low' | 'medium' | 'high';
 /** How often milestones/checkpoints are spaced for a goal. */
 export type MilestoneFrequency = 'weekly' | 'biweekly' | 'monthly';
 
+/**
+ * Shapes how AI writes milestone labels and daily-quest tone.
+ * - linear: predictable numeric/quota slices
+ * - biological: ranges, trends, behavior—not fixed per-period body outcomes
+ * - skill_based: deliberate practice / difficulty / feedback ladder
+ * - outcome_based: concrete steps toward an outcome without guarantees
+ */
+export type GoalType =
+  | 'linear'
+  | 'biological'
+  | 'skill_based'
+  | 'outcome_based';
+
 export type QuestKind = 'daily' | 'weekly';
 
 export interface Quest {
@@ -43,6 +56,8 @@ export interface Goal {
   priority?: GoalPriority;
   /** Milestone spacing; defaults to weekly when missing (legacy goals). */
   milestoneFrequency?: MilestoneFrequency;
+  /** How milestones/dailies are framed; defaults to linear when missing (legacy). */
+  goalType?: GoalType;
   /** Full-goal achievability analysis from the add-goal wizard (optional). */
   achievabilityCritique?: string;
   checkpoints: Checkpoint[];

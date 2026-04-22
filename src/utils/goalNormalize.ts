@@ -1,4 +1,4 @@
-import type { Checkpoint, Goal, MilestoneFrequency, Quest } from '../types';
+import type { Checkpoint, Goal, GoalType, MilestoneFrequency, Quest } from '../types';
 
 import { parseGoalPriority } from './goalPriority';
 
@@ -7,6 +7,18 @@ export function parseMilestoneFrequency(raw: unknown): MilestoneFrequency {
     return raw;
   }
   return 'weekly';
+}
+
+export function parseGoalType(raw: unknown): GoalType {
+  if (
+    raw === 'linear' ||
+    raw === 'biological' ||
+    raw === 'skill_based' ||
+    raw === 'outcome_based'
+  ) {
+    return raw;
+  }
+  return 'linear';
 }
 
 export function normalizeQuest(raw: unknown): Quest | null {
@@ -94,6 +106,7 @@ export function normalizeGoal(raw: unknown): Goal | null {
     targetDateIso: typeof o.targetDateIso === 'string' ? o.targetDateIso : undefined,
     priority: parseGoalPriority(o.priority),
     milestoneFrequency: parseMilestoneFrequency(o.milestoneFrequency),
+    goalType: parseGoalType(o.goalType),
     achievabilityCritique:
       typeof o.achievabilityCritique === 'string' && o.achievabilityCritique.trim()
         ? o.achievabilityCritique.trim()

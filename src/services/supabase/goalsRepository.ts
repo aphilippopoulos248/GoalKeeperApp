@@ -1,6 +1,7 @@
 import { supabase } from '../../lib/supabase';
 import type { Checkpoint, Goal, Quest } from '../../types';
 
+import { parseGoalType } from '../../utils/goalNormalize';
 import { parseGoalPriority } from '../../utils/goalPriority';
 
 import { ensurePublicProfileRow } from './ensurePublicProfile';
@@ -18,6 +19,7 @@ type GoalRow = {
   target_date_iso: string | null;
   priority: string;
   milestone_frequency: string;
+  goal_type: string;
   achievability_critique: string | null;
   completed: boolean;
 };
@@ -81,6 +83,7 @@ function goalRowFromGoal(userId: string, g: Goal): GoalRow {
       g.milestoneFrequency === 'biweekly' || g.milestoneFrequency === 'monthly'
         ? g.milestoneFrequency
         : 'weekly',
+    goal_type: parseGoalType(g.goalType),
     achievability_critique: g.achievabilityCritique?.trim() || null,
     completed: g.completed,
   };
@@ -99,6 +102,7 @@ function goalFromRow(row: GoalRow, checkpoints: CheckpointRow[], quests: QuestRo
     row.milestone_frequency === 'biweekly' || row.milestone_frequency === 'monthly'
       ? row.milestone_frequency
       : 'weekly';
+  const goalType = parseGoalType(row.goal_type);
   return {
     id: row.id,
     title: row.title,
@@ -113,6 +117,7 @@ function goalFromRow(row: GoalRow, checkpoints: CheckpointRow[], quests: QuestRo
       : undefined,
     priority: parseGoalPriority(row.priority),
     milestoneFrequency,
+    goalType,
     achievabilityCritique: row.achievability_critique ?? undefined,
     checkpoints: cps,
     dailyQuests,

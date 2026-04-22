@@ -23,8 +23,8 @@ import type {
   PlannerDailyQuest,
   ReservedScheduleSlot,
 } from '../services/openaiGoalPlanner';
-import { Checkpoint, Goal, GoalPriority, MilestoneFrequency, Quest } from '../types';
-import { parseMilestoneFrequency } from '../utils/goalNormalize';
+import { Checkpoint, Goal, GoalPriority, GoalType, MilestoneFrequency, Quest } from '../types';
+import { parseGoalType, parseMilestoneFrequency } from '../utils/goalNormalize';
 import {
   clampScheduleDurationMinutes,
   clampScheduleStartMinute,
@@ -40,6 +40,7 @@ export type NewGoalInput = {
   targetDate: Date;
   priority: GoalPriority;
   milestoneFrequency: MilestoneFrequency;
+  goalType: GoalType;
 };
 
 export type AddGoalOptions = {
@@ -147,6 +148,7 @@ function buildGoalFromInput(input: NewGoalInput, options?: AddGoalOptions): Goal
       targetDateIso,
       priority: input.priority,
       milestoneFrequency: input.milestoneFrequency,
+      goalType: input.goalType,
       ...critiqueSpread,
       completed: false,
       checkpoints: [
@@ -171,6 +173,7 @@ function buildGoalFromInput(input: NewGoalInput, options?: AddGoalOptions): Goal
     targetDateIso,
     priority: input.priority,
     milestoneFrequency: input.milestoneFrequency,
+    goalType: input.goalType,
     ...critiqueSpread,
     completed: false,
     checkpoints: enrichmentToCheckpoints(id, enrichment),
@@ -273,6 +276,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
             totalCheckpointCount: snapshot.checkpoints.length,
             dailyQuestCount: questCount,
             milestoneFrequency: parseMilestoneFrequency(snapshot.milestoneFrequency),
+            goalType: parseGoalType(snapshot.goalType),
             reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
               lifeScheduleSlots,
               goals,
@@ -450,6 +454,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
           totalCheckpointCount: goal.checkpoints.length,
           dailyQuestCount: questCount,
           milestoneFrequency: parseMilestoneFrequency(goal.milestoneFrequency),
+          goalType: parseGoalType(goal.goalType),
           reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
             lifeScheduleSlotsRef.current,
             working,

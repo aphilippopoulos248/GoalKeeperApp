@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 
-import type { MilestoneFrequency, Quest } from '../types';
+import type { GoalType, MilestoneFrequency, Quest } from '../types';
+import { parseGoalType } from '../utils/goalNormalize';
 
 export type PlannerDailyQuest = {
   title: string;
@@ -46,6 +47,8 @@ export type GoalPlannerBaseParams = {
   dailyQuestCount: number;
   /** Milestone spacing for checkpoints; defaults to weekly when omitted. */
   milestoneFrequency?: MilestoneFrequency;
+  /** How checkpoint labels and daily framing should read; defaults to linear when omitted. */
+  goalType?: GoalType;
   /** Busy intervals from other active goals; new dailies must not overlap these. */
   reservedScheduleSlots?: ReservedScheduleSlot[];
 };
@@ -67,7 +70,65 @@ export type GoalPlannerErrorCode =
   | 'missing_key'
   | 'network'
   | 'bad_response'
+  | 'checkpoint_mismatch'
   | 'api_error';
+
+/** Cap AI-generated milestones per goal (long horizons still get a full year of weekly steps). */
+export const MAX_AI_CHECKPOINTS = 52;
+
+export type CheckpointPlan = {
+  planDurationDays: number;
+  expectedCheckpointCount: number;
+  expectedWeekOffsets: number[];
+};
+
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * Derives milestone count and weekOffset sequence from today → target and cadence.
+ * Weekly: offsets 1,2,3,… — biweekly: 2,4,6,… — monthly (~4wk): 4,8,12,…
+ */
+export function computeCheckpointPlan(
+  todayIso: string,
+  targetDateIso: string,
+  milestoneFrequency: MilestoneFrequency,
+): CheckpointPlan {
+  const t0 = Date.parse(todayIso);
+  const t1 = Date.parse(targetDateIso);
+  const planDurationDays =
+    Number.isFinite(t0) && Number.isFinite(t1)
+      ? Math.max(1, Math.ceil((t1 - t0) / MS_PER_DAY))
+      : 1;
+
+  let stepWeeks: number;
+  let periods: number;
+  switch (milestoneFrequency) {
+    case 'biweekly':
+      stepWeeks = 2;
+      periods = Math.ceil(planDurationDays / 14);
+      break;
+    case 'monthly':
+      stepWeeks = 4;
+      periods = Math.ceil(planDurationDays / 30);
+      break;
+    case 'weekly':
+    default:
+      stepWeeks = 1;
+      periods = Math.ceil(planDurationDays / 7);
+      break;
+  }
+
+  const expectedCheckpointCount = Math.min(
+    MAX_AI_CHECKPOINTS,
+    Math.max(1, periods),
+  );
+  const expectedWeekOffsets = Array.from(
+    { length: expectedCheckpointCount },
+    (_, i) => (i + 1) * stepWeeks,
+  );
+
+  return { planDurationDays, expectedCheckpointCount, expectedWeekOffsets };
+}
 
 export class GoalPlannerError extends Error {
   constructor(
@@ -337,18 +398,6 @@ function normalizeDailyQuestDayOrders(quests: DailyQuestParseRow[]): DailyQuestP
   });
 }
 
-function checkpointSpacingInstruction(freq: MilestoneFrequency): string {
-  switch (freq) {
-    case 'biweekly':
-      return `Milestone frequency is BI-WEEKLY: use weekOffset 2, 4, 6, … only (every two weeks from the start) through the target date. Space milestones evenly on that cadence. Do not use odd week numbers for checkpoints.`;
-    case 'monthly':
-      return `Milestone frequency is MONTHLY: use weekOffset 4, 8, 12, … only (approximately every four weeks) through the target date. Space milestones evenly on that cadence.`;
-    case 'weekly':
-    default:
-      return `Milestone frequency is WEEKLY: use weekOffset 1, 2, 3, … (consecutive weeks from the start) through the target date. Space milestones evenly—one checkpoint per week.`;
-  }
-}
-
 /**
  * Shared by buildFullSystem and buildRegenSystem: concreteness, milestone difficulty, title vs body.
  * Keep in sync when editing either path.
@@ -386,12 +435,71 @@ const REGEN_ANTI_REPETITION_RULES = `Replace mode (applies when user JSON has "r
 - If "replacePreviousQuests" is false or "previousDailyQuests" is empty, ignore this block.
 - "regenerationRequestId" in the user JSON is unique per request; each id must produce an independent new batch, not a small edit of the last output.`;
 
+function goalTypeCheckpointGuidance(goalType: GoalType): string {
+  const header = `Goal type (checkpoints)—user JSON field "goalType" is "${goalType}". Use it to phrase each checkpoint **label** only; checkpoint **count** and **weekOffset** sequence stay fixed above.`;
+
+  switch (goalType) {
+    case 'biological':
+      return `${header}
+- **linear** rules below do **not** apply to fixed weekly physiological outcomes.
+- **Do not** assign precise per-cadence outcome amounts (e.g. "lose 1 lb this week", "gain 0.5 lb muscle per week", fixed weekly weight/rep/body-fat deltas).
+- **Do** use ranges, trends, or behavior/process milestones: adherence, training frequency, recovery/sleep, habit consistency, check-ins, deload/reassessment, volume/intensity bands ("add reps only when form stays solid in the 8–10 range"), trend reviews ("review 2-week average weight trend"), process wins (e.g. hit protein target 5/7 days).
+- Reflect nonlinear adaptation and plateaus; reward **systems and behaviors**, not guaranteed jumps every period.`;
+    case 'skill_based':
+      return `${header}
+- **Deliberate-practice ladder:** milestones escalate reps, difficulty, feedback, or small real-world tests—not only time spent.
+- Labels should show **clearer challenge or feedback** each period while staying verifiable for that week/biweek/month slice.`;
+    case 'outcome_based':
+      return `${header}
+- **Concrete steps toward the outcome:** applications, conversations, portfolio/deliverable slices, networking—without guaranteeing results.
+- Keep respect/consent/safety from the Outcome proximity rules; milestones are **meaningful actions**, not promises of a specific personal outcome.`;
+    case 'linear':
+    default:
+      return `${header}
+- **Predictable slices:** when the user gave numbers or quotas (books, dollars, pages, hours, units), checkpoint labels should use **concrete per-period increments** that match (e.g. "Finish your second book", "Save \$X this month").
+- Prefer naming the increment or slice rather than vague motivation.`;
+  }
+}
+
+function goalTypeDailyQuestGuidance(goalType: GoalType): string {
+  switch (goalType) {
+    case 'biological':
+      return `Goal type (daily quests): "biological". Do **not** set fixed "X lbs this week" or similar precise per-period body outcomes in titles/descriptions. Prefer **process, ranges, trends, adherence, recovery, and measurement habits**—still one-day sized and smaller than milestones.`;
+    case 'skill_based':
+      return `Goal type (daily quests): "skill_based". Emphasize **practice, feedback, and small escalations**; dailies stay easier than milestones but follow a skill ladder.`;
+    case 'outcome_based':
+      return `Goal type (daily quests): "outcome_based". Prefer **concrete actions** toward the outcome (prep, outreach, reflection, portfolio work); no guaranteed relationship/job outcomes in copy.`;
+    case 'linear':
+    default:
+      return `Goal type (daily quests): "linear". Dailies can track **clear numeric or quota steps** when they match the goal, still smaller than milestones.`;
+  }
+}
+
 function buildFullSystem(
   dailyQuestCount: number,
   milestoneFrequency: MilestoneFrequency,
+  checkpointPlan: CheckpointPlan,
+  goalType: GoalType,
 ): string {
   const n = clampQuestCount(dailyQuestCount);
-  const checkpointCadence = checkpointSpacingInstruction(milestoneFrequency);
+  const offsetsList = checkpointPlan.expectedWeekOffsets.join(', ');
+  const milestoneBlock = `Checkpoints (critical):
+- The user JSON includes planDurationDays, expectedCheckpointCount, expectedWeekOffsets, milestoneFrequency ("${milestoneFrequency}"), goalType ("${goalType}"), todayIso, and targetDateIso.
+- You MUST return exactly ${checkpointPlan.expectedCheckpointCount} objects in "checkpoints" (no fewer, no more).
+- For each index i, checkpoints[i].weekOffset MUST equal expectedWeekOffsets[i]. Required sequence: [${offsetsList}]. weekOffset is the week number from goal start (1 = end of week 1).
+- Each "label" is ONE milestone title (no "Week N:" prefix). Each label must be a **single clear, verifiable** outcome for that period; avoid vague labels like "keep going".
+- **Progression:** Early checkpoints = first concrete slice toward the user’s outcome; each next checkpoint advances along the same path; the **last** checkpoint should complete (or nearly complete) the stated goal by targetDateIso—**interpret "complete" via goalType** (linear = metric progress; biological = systems/trends; skill = practice ladder; outcome = meaningful steps without guarantees).
+- **Specificity:** Tie labels to the user’s title and description. When goalType is **linear** and they gave **numbers or quotas** (books, dollars, kg, reps, sessions, pages, hours), milestones should reflect those metrics as increments or named slices (e.g. "Finish your first book", "Finish your second book"). When goalType is **biological**, do **not** convert those numbers into fixed per-period body outcomes; use the Goal type (checkpoints) block instead.
+- **Quantitative goals (linear only):** Prefer labels that name the increment (book 1/2/3, \$X saved) rather than generic motivation.
+- **Qualitative or social goals:** Milestones can be bolder real-world steps when that fits goalType; still one meaningful step per period.
+
+${goalTypeCheckpointGuidance(goalType)}
+
+Milestones vs daily quests:
+- Milestones are the **cadence-sized slice** of the outcome for that period—not necessarily a single dramatic leap. They remain **larger** than any one daily quest.
+- Daily quests are **smaller**, **build toward** upcoming checkpoints, and must **not** copy milestone wording. At **low** completedCheckpointCount they are mostly preparatory; later they move closer to the outcome (see Outcome proximity below).
+- Apply **goalType** to daily quest tone per **Goal type (daily quests)** in Rules below.`;
+
   return `You are a goal-planning coach. Reply with a single JSON object only (no markdown).
 Fields:
 - specific: string (refined SMART Specific)
@@ -400,12 +508,9 @@ Fields:
 - relevant: string (SMART Relevant)
 - timeBound: string (one clear sentence: deadline and horizon in plain language)
 - timeBoundCritique: string (one short honest critique of whether the deadline is realistic for the outcome; suggest adjustment if needed)
-- checkpoints: array of { "weekOffset": number, "label": string }. weekOffset is the week number from the start (1 = end of week 1). ${checkpointCadence} Each "label" is ONE milestone title (no "Week N:" prefix).
+- checkpoints: array of { "weekOffset": number, "label": string }.
 
-Milestones vs daily quests (critical):
-- Milestones (checkpoint labels) are **major sub-goals**—noticeably **harder and braver** than any single daily quest. They should feel like **real progress** and often push the user **outside their comfort zone** in a way that fits the goal (e.g. for “improve social skills”: daily quests might be “practice a short conversation” or “watch a video on body language”, while a milestone might be “attend a public meetup or social event alone”). Milestones are **not** small home exercises; they are **challenge moments** the user would not do every day.
-- Daily quests are **smaller** than milestones and **build toward** them. At **low** completedCheckpointCount they are mostly **preparatory** (practice, reflection, learning, low-stakes rehearsal). At **higher** completedCheckpointCount they should also move **closer to the named goal outcome** (see Outcome proximity below)—not stay forever in generic prep. They must **not** copy the same wording as a milestone.
-- Each milestone label must be a **single clear, verifiable challenge** for that period; avoid vague labels like “keep going”.
+${milestoneBlock}
 
 ${DAILY_QUEST_COPY_AND_TIER_RULES}
 
@@ -416,7 +521,8 @@ ${DAILY_QUEST_RUNWAY_REALISM_RULES}
 Rules:
 - Use the user's title and description; make SMART fields concrete.
 - If completedCheckpointCount is 0, daily quests must be VERY EASY (5–15 min, low friction), following the zero-baseline and ramp rules above. If higher, increase **proximity to the goal outcome** and difficulty/points modestly (still safe and actionable) per the Outcome proximity and **Timeframe and realism** blocks above—never near-impossible single-day quests.
-- Checkpoints must align with the goal, deadline, and milestoneFrequency from the user message.
+- Checkpoints must match expectedCheckpointCount and expectedWeekOffsets from the user message exactly, and align with the goal, deadline, and **goalType**.
+- ${goalTypeDailyQuestGuidance(goalType)}
 - dailyQuests must be specific to this goal’s title and description (not generic self-help).
 - Each dailyQuest "points" MUST be exactly one of 10, 15, 20, or 25 (use different values across quests when possible).
 - Each dailyQuest MUST include dayOrder: integer 0–999. The app sorts ALL goals’ quests by dayOrder ascending (lower = earlier on the Menu, higher = later).
@@ -429,7 +535,7 @@ Rules:
 - You MUST return exactly ${n} items in dailyQuests (no fewer, no more).`;
 }
 
-function buildRegenSystem(dailyQuestCount: number): string {
+function buildRegenSystem(dailyQuestCount: number, goalType: GoalType): string {
   const n = clampQuestCount(dailyQuestCount);
   return `You are a goal-planning coach. Reply with a single JSON object only: { "dailyQuests": [ ... ] }.
 dailyQuests must have exactly ${n} items: { "title", "description", "points", "dayOrder", "startMinute", "durationMinutes" } with points exactly 10, 15, 20, or 25 only (vary across quests), dayOrder 0–999, startMinute 0–1439, durationMinutes 15–120. Blocks must not overlap within the array; prefer 06:00–22:00. If the user JSON includes reservedScheduleSlots, treat each entry as a busy half-open interval [startMinute, endMinute)—your quests must not overlap those (one quest at a time globally).
@@ -443,6 +549,7 @@ ${DAILY_QUEST_RUNWAY_REALISM_RULES}
 ${REGEN_ANTI_REPETITION_RULES}
 
 Rules:
+- The user JSON includes "goalType" (linear / biological / skill_based / outcome_based). ${goalTypeDailyQuestGuidance(goalType)}
 - The user JSON includes "checkpointTitles" and (when present) "upcomingCheckpointTitles" and "totalCheckpointCount". Daily quests must be **smaller** than full milestones, **support** the path to upcoming milestones, and **increase closeness to the goal** as completedCheckpointCount rises (see Outcome proximity). They must **not** duplicate a milestone’s wording. Use completedCheckpointCount, upcoming checkpoints, and **not** only generic "prep" at high progress. Always respect **Timeframe and realism**: one-day achievable, not nearly impossible even at high milestones.
 - The user message includes milestoneFrequency (weekly / biweekly / monthly). Align daily quest pacing and tone with that cadence (e.g. smaller daily steps when milestones are weekly vs monthly).
 - Quests must support the user's goal and build skills toward the **next** milestones the user has not yet reached.
@@ -709,7 +816,8 @@ function pairTitleDescription(
 function parseFullResult(
   data: unknown,
   dailyQuestCount: number,
-  reservedScheduleSlots?: ReservedScheduleSlot[],
+  reservedScheduleSlots: ReservedScheduleSlot[] | undefined,
+  checkpointPlan: CheckpointPlan,
 ): GoalPlannerFullResult {
   const n = clampQuestCount(dailyQuestCount);
   if (!isRecord(data)) {
@@ -752,6 +860,23 @@ function parseFullResult(
 
   if (checkpoints.length === 0) {
     throw new GoalPlannerError('No valid checkpoints', 'bad_response');
+  }
+
+  checkpoints.sort((a, b) => a.weekOffset - b.weekOffset);
+
+  if (checkpoints.length !== checkpointPlan.expectedCheckpointCount) {
+    throw new GoalPlannerError(
+      `Checkpoints: expected exactly ${checkpointPlan.expectedCheckpointCount}, got ${checkpoints.length}`,
+      'checkpoint_mismatch',
+    );
+  }
+  for (let i = 0; i < checkpoints.length; i++) {
+    if (checkpoints[i].weekOffset !== checkpointPlan.expectedWeekOffsets[i]) {
+      throw new GoalPlannerError(
+        `Checkpoints: at index ${i} expected weekOffset ${checkpointPlan.expectedWeekOffsets[i]}, got ${checkpoints[i].weekOffset}`,
+        'checkpoint_mismatch',
+      );
+    }
   }
 
   if (!Array.isArray(data.dailyQuests)) {
@@ -1004,6 +1129,13 @@ export async function planNewGoal(
 ): Promise<GoalPlannerFullResult> {
   const dailyQuestCount = clampQuestCount(params.dailyQuestCount);
   const milestoneFrequency = params.milestoneFrequency ?? 'weekly';
+  const goalType = parseGoalType(params.goalType);
+  const checkpointPlan = computeCheckpointPlan(
+    params.todayIso,
+    params.targetDateIso,
+    milestoneFrequency,
+  );
+
   const user = JSON.stringify({
     title: params.title,
     description: params.description,
@@ -1012,14 +1144,44 @@ export async function planNewGoal(
     completedCheckpointCount: params.completedCheckpointCount,
     dailyQuestCount,
     milestoneFrequency,
+    goalType,
+    planDurationDays: checkpointPlan.planDurationDays,
+    expectedCheckpointCount: checkpointPlan.expectedCheckpointCount,
+    expectedWeekOffsets: checkpointPlan.expectedWeekOffsets,
     reservedScheduleSlots: params.reservedScheduleSlots ?? [],
   });
 
-  const data = await postChatJson(
-    buildFullSystem(dailyQuestCount, milestoneFrequency),
-    user,
-  );
-  return parseFullResult(data, dailyQuestCount, params.reservedScheduleSlots);
+  const runOnce = async (isRetry: boolean): Promise<GoalPlannerFullResult> => {
+    let system = buildFullSystem(
+      dailyQuestCount,
+      milestoneFrequency,
+      checkpointPlan,
+      goalType,
+    );
+    if (isRetry) {
+      system += `
+
+RETRY — Your previous reply failed validation. checkpoints must contain exactly ${checkpointPlan.expectedCheckpointCount} items, and each checkpoints[i].weekOffset must equal expectedWeekOffsets[i] in order: [${checkpointPlan.expectedWeekOffsets.join(', ')}]. Reply with a single valid JSON object; follow all other rules unchanged.`;
+    }
+    const data = await postChatJson(system, user, {
+      temperature: isRetry ? 0.35 : undefined,
+    });
+    return parseFullResult(
+      data,
+      dailyQuestCount,
+      params.reservedScheduleSlots,
+      checkpointPlan,
+    );
+  };
+
+  try {
+    return await runOnce(false);
+  } catch (e) {
+    if (e instanceof GoalPlannerError && e.code === 'checkpoint_mismatch') {
+      return await runOnce(true);
+    }
+    throw e;
+  }
 }
 
 export async function regenerateDailyQuests(
@@ -1027,6 +1189,7 @@ export async function regenerateDailyQuests(
 ): Promise<GoalPlannerFullResult['dailyQuests']> {
   const dailyQuestCount = clampQuestCount(params.dailyQuestCount);
   const milestoneFrequency = params.milestoneFrequency ?? 'weekly';
+  const goalType = parseGoalType(params.goalType);
   const previousDailyQuests = (params.previousDailyQuests ?? [])
     .filter((q) => (q.title?.trim() ?? '') !== '' || (q.description?.trim() ?? '') !== '')
     .map((q) => ({
@@ -1045,6 +1208,7 @@ export async function regenerateDailyQuests(
     totalCheckpointCount: params.totalCheckpointCount,
     dailyQuestCount,
     milestoneFrequency,
+    goalType,
     reservedScheduleSlots: params.reservedScheduleSlots ?? [],
     previousDailyQuests: replacePreviousQuests ? previousDailyQuests : [],
     replacePreviousQuests,
@@ -1052,7 +1216,7 @@ export async function regenerateDailyQuests(
     regenerationRequestId: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
   });
 
-  const data = await postChatJson(buildRegenSystem(dailyQuestCount), user, {
+  const data = await postChatJson(buildRegenSystem(dailyQuestCount, goalType), user, {
     temperature: replacePreviousQuests ? 0.72 : 0.35,
   });
   return parseDailyOnly(data, dailyQuestCount, params.reservedScheduleSlots);

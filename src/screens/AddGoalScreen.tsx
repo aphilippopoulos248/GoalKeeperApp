@@ -26,7 +26,7 @@ import {
   critiqueGoalAchievability,
   planNewGoal,
 } from '../services/openaiGoalPlanner';
-import type { GoalPriority, MilestoneFrequency } from '../types';
+import type { GoalPriority, GoalType, MilestoneFrequency } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 import { measurementTargetAlreadySpecified } from '../utils/goalQuantificationHeuristics';
@@ -97,6 +97,7 @@ export function AddGoalScreen({ navigation }: Props) {
   const [priority, setPriority] = useState<GoalPriority>('medium');
   const [milestoneFrequency, setMilestoneFrequency] =
     useState<MilestoneFrequency>('weekly');
+  const [goalType, setGoalType] = useState<GoalType>('linear');
 
   const [busy, setBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -302,6 +303,7 @@ export function AddGoalScreen({ navigation }: Props) {
         targetDate,
         priority,
         milestoneFrequency,
+        goalType,
       };
       const enrichment = await planNewGoal({
         title: input.title,
@@ -311,6 +313,7 @@ export function AddGoalScreen({ navigation }: Props) {
         completedCheckpointCount: 0,
         dailyQuestCount: dailyQuestCountForPriority(priority),
         milestoneFrequency,
+        goalType,
         reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
           lifeScheduleSlots,
           goals.filter((g) => !g.completed),
@@ -339,6 +342,7 @@ export function AddGoalScreen({ navigation }: Props) {
   }, [
     achievabilityCritique,
     addGoal,
+    goalType,
     goals,
     lifeScheduleSlots,
     milestoneFrequency,
@@ -686,7 +690,9 @@ export function AddGoalScreen({ navigation }: Props) {
     if (phase === 'prefs') {
       return (
         <>
-          {assistantLine('Choose priority and how often you want milestones spaced.')}
+          {assistantLine(
+            'Choose priority, milestone spacing, and what kind of goal this is (this shapes AI milestones).',
+          )}
           <Text style={[styles.label, { color: colors.textSecondary }]}>Priority</Text>
           <View
             style={[
@@ -732,6 +738,34 @@ export function AddGoalScreen({ navigation }: Props) {
               <Picker.Item label="Weekly" value="weekly" color={colors.text} />
               <Picker.Item label="Bi-Weekly" value="biweekly" color={colors.text} />
               <Picker.Item label="Monthly" value="monthly" color={colors.text} />
+            </Picker>
+          </View>
+
+          <Text style={[styles.label, { color: colors.textSecondary }]}>Goal type</Text>
+          <View
+            style={[
+              styles.pickerWrapOuter,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Picker
+              selectedValue={goalType}
+              onValueChange={(v) => setGoalType(v as GoalType)}
+              style={[styles.picker, { color: colors.text }]}
+              mode={Platform.OS === 'android' ? 'dropdown' : undefined}
+              dropdownIconColor={colors.textSecondary}
+            >
+              <Picker.Item label="Linear (predictable)" value="linear" color={colors.text} />
+              <Picker.Item
+                label="Biological (nonlinear)"
+                value="biological"
+                color={colors.text}
+              />
+              <Picker.Item label="Skill-based" value="skill_based" color={colors.text} />
+              <Picker.Item label="Outcome-based" value="outcome_based" color={colors.text} />
             </Picker>
           </View>
 
