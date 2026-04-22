@@ -8,7 +8,6 @@ import React, {
   useState,
 } from 'react';
 
-import { mockDailyQuests, mockWeeklyQuests } from '../data/mockQuests';
 import { useDailyStreakAndPointsToday } from '../hooks/useDailyStreakAndPointsToday';
 import {
   fetchGoalBarEarnedMap,
@@ -16,7 +15,7 @@ import {
   upsertGoalBarEarned,
   upsertQuestCompletion,
 } from '../services/supabase/questProgressRepository';
-import { fetchOrSeedWeeklyQuests } from '../services/supabase/weeklyQuestsRepository';
+import { fetchWeeklyQuestsForUser } from '../services/supabase/weeklyQuestsRepository';
 import type { Quest } from '../types';
 import { resolveQuestScheduleBlock } from '../utils/dailyQuestSchedule';
 
@@ -67,7 +66,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
     useDailyStreakAndPointsToday(userId, authReady);
   const [completed, setCompleted] = useState<Record<string, boolean>>({});
   const [goalBarEarned, setGoalBarEarned] = useState<Record<string, number>>({});
-  const [weeklyQuests, setWeeklyQuests] = useState<Quest[]>(mockWeeklyQuests);
+  const [weeklyQuests, setWeeklyQuests] = useState<Quest[]>([]);
   const completedRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -78,11 +77,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
 
   const dailyQuestEntries = useMemo((): DailyQuestEntry[] => {
     if (activeGoals.length === 0) {
-      return mockDailyQuests.map((quest) => ({
-        goalId: '',
-        goalTitle: 'Daily',
-        quest,
-      }));
+      return [];
     }
     const entries = activeGoals.flatMap((g) =>
       (g.dailyQuests ?? []).map((quest) => ({
@@ -103,11 +98,11 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
   useEffect(() => {
     if (!authReady) return;
     if (userId === null) {
-      setWeeklyQuests(mockWeeklyQuests);
+      setWeeklyQuests([]);
       return;
     }
     let cancelled = false;
-    void fetchOrSeedWeeklyQuests(userId).then((w) => {
+    void fetchWeeklyQuestsForUser(userId).then((w) => {
       if (!cancelled) setWeeklyQuests(w);
     });
     return () => {

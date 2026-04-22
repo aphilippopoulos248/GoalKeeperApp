@@ -95,9 +95,9 @@ export async function migrateLegacyLocalData(userId: string): Promise<void> {
     }
 
     if (!(await remoteCompletionsNonEmpty(userId))) {
-      await ensureWeeklyQuestRowsInDb(userId);
       const raw = await getItemScopedWithLegacyMigrate(LEGACY_QUEST_COMPLETED_KEY, userId);
       if (raw) {
+        await ensureWeeklyQuestRowsInDb(userId);
         const parsed = JSON.parse(raw) as Record<string, unknown>;
         if (parsed && typeof parsed === 'object') {
           let map: Record<string, boolean> = {};
