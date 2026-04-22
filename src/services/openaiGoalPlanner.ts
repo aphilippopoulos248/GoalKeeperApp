@@ -1245,10 +1245,13 @@ export type ClassifyQuantificationResult = {
 export async function classifyQuantificationNeed(params: {
   shortTitle: string;
   specifics: string;
+  achievementDifficulty?: string;
 }): Promise<ClassifyQuantificationResult> {
+  const diff = params.achievementDifficulty?.trim();
   const user = JSON.stringify({
     shortTitle: params.shortTitle.trim(),
     specifics: params.specifics.trim(),
+    ...(diff ? { achievementDifficulty: diff } : {}),
   });
   const data = await postChatJson(QUANTIFY_CLASSIFY_SYSTEM, user);
   if (!isRecord(data)) {
@@ -1272,6 +1275,7 @@ Assess how realistic the goal is versus the stated deadline. Be honest but suppo
 export type CritiqueGoalAchievabilityParams = {
   shortTitle: string;
   specifics: string;
+  achievementDifficulty?: string;
   quantificationAnswer?: string;
   targetDateIso: string;
   whyHelpful: string;
@@ -1308,9 +1312,14 @@ function flattenAchievabilityCritique(data: Record<string, unknown>): string {
 export async function critiqueGoalAchievability(
   params: CritiqueGoalAchievabilityParams,
 ): Promise<string> {
+  const diff =
+    params.achievementDifficulty && params.achievementDifficulty.trim()
+      ? params.achievementDifficulty.trim()
+      : null;
   const user = JSON.stringify({
     shortTitle: params.shortTitle.trim(),
     specifics: params.specifics.trim(),
+    achievementDifficulty: diff,
     quantificationAnswer:
       params.quantificationAnswer && params.quantificationAnswer.trim()
         ? params.quantificationAnswer.trim()

@@ -38,6 +38,7 @@ type Props = NativeStackScreenProps<GoalsStackParamList, 'AddGoal'>;
 type Phase =
   | 'title'
   | 'specific'
+  | 'difficulty'
   | 'quantify'
   | 'deadline'
   | 'why'
@@ -69,11 +70,13 @@ function mergeDateAndTime(datePart: Date, timePart: Date): Date {
 
 function buildRichDescription(input: {
   specifics: string;
+  achievementDifficulty: string;
   quantityAnswer?: string;
   targetDate: Date;
   whyHelpful: string;
 }): string {
   const lines: string[] = [`Details: ${input.specifics.trim()}`];
+  lines.push(`What makes this difficult: ${input.achievementDifficulty.trim()}`);
   if (input.quantityAnswer?.trim()) {
     lines.push(`Concrete target: ${input.quantityAnswer.trim()}`);
   }
@@ -89,6 +92,7 @@ export function AddGoalScreen({ navigation }: Props) {
   const [phase, setPhase] = useState<Phase>('title');
   const [shortTitle, setShortTitle] = useState('');
   const [specifics, setSpecifics] = useState('');
+  const [achievementDifficulty, setAchievementDifficulty] = useState('');
   const [quantityAnswer, setQuantityAnswer] = useState('');
   const [quantifyQuestion, setQuantifyQuestion] = useState('');
   const [targetDate, setTargetDate] = useState(() => startOfTomorrow());
@@ -112,6 +116,7 @@ export function AddGoalScreen({ navigation }: Props) {
   const titleWordCount = useMemo(() => wordCount(shortTitle), [shortTitle]);
   const titleOk = titleWordCount > 0 && titleWordCount <= 5;
   const specificOk = specifics.trim().length > 0;
+  const difficultyOk = achievementDifficulty.trim().length > 0;
   const quantifyOk = quantityAnswer.trim().length > 0;
   const whyOk = whyHelpful.trim().length > 0;
 
@@ -135,15 +140,18 @@ export function AddGoalScreen({ navigation }: Props) {
       case 'specific':
         setPhase('title');
         break;
+      case 'difficulty':
+        setPhase('specific');
+        break;
       case 'quantify':
         setQuantityAnswer('');
-        setPhase('specific');
+        setPhase('difficulty');
         break;
       case 'deadline':
         if (quantityAnswer.trim()) {
           setPhase('quantify');
         } else {
-          setPhase('specific');
+          setPhase('difficulty');
         }
         break;
       case 'why':
@@ -203,9 +211,9 @@ export function AddGoalScreen({ navigation }: Props) {
     setPickerOpen(false);
   }, []);
 
-  const afterSpecificContinue = useCallback(async () => {
-    if (!specificOk) return;
-    const combined = `${shortTitle} ${specifics}`;
+  const afterDifficultyContinue = useCallback(async () => {
+    if (!difficultyOk) return;
+    const combined = `${shortTitle} ${specifics} ${achievementDifficulty}`;
     if (measurementTargetAlreadySpecified(combined)) {
       setPhase('deadline');
       return;
@@ -213,7 +221,11 @@ export function AddGoalScreen({ navigation }: Props) {
 
     setBusy(true);
     try {
-      const r = await classifyQuantificationNeed({ shortTitle, specifics });
+      const r = await classifyQuantificationNeed({
+        shortTitle,
+        specifics,
+        achievementDifficulty,
+      });
       if (r.needsQuantification) {
         const q = r.suggestedQuestion.trim() || DEFAULT_MEASUREMENT_QUESTION;
         setQuantifyQuestion(q);
@@ -228,12 +240,12 @@ export function AddGoalScreen({ navigation }: Props) {
           : 'Could not analyze your goal. Try again.';
       Alert.alert('AI unavailable', message, [
         { text: 'Skip extra question', onPress: () => setPhase('deadline') },
-        { text: 'Retry', onPress: () => void afterSpecificContinue() },
+        { text: 'Retry', onPress: () => void afterDifficultyContinue() },
       ]);
     } finally {
       setBusy(false);
     }
-  }, [shortTitle, specifics, specificOk]);
+  }, [achievementDifficulty, difficultyOk, shortTitle, specifics]);
 
   const afterQuantifyContinue = useCallback(() => {
     if (!quantifyOk) return;
@@ -258,6 +270,7 @@ export function AddGoalScreen({ navigation }: Props) {
       const text = await critiqueGoalAchievability({
         shortTitle: shortTitle.trim(),
         specifics: specifics.trim(),
+        achievementDifficulty: achievementDifficulty.trim(),
         quantificationAnswer: quantityAnswer.trim() || undefined,
         targetDateIso: targetDate.toISOString(),
         whyHelpful: whyHelpful.trim(),
@@ -280,7 +293,15 @@ export function AddGoalScreen({ navigation }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [shortTitle, specifics, quantityAnswer, targetDate, whyHelpful, whyOk]);
+  }, [
+    achievementDifficulty,
+    quantityAnswer,
+    shortTitle,
+    specifics,
+    targetDate,
+    whyHelpful,
+    whyOk,
+  ]);
 
   const afterCritiqueContinue = useCallback(() => {
     if (!achievabilityCritique.trim()) return;
@@ -293,6 +314,7 @@ export function AddGoalScreen({ navigation }: Props) {
       const today = new Date();
       const description = buildRichDescription({
         specifics,
+        achievementDifficulty,
         quantityAnswer: quantityAnswer.trim() || undefined,
         targetDate,
         whyHelpful,
@@ -340,6 +362,7 @@ export function AddGoalScreen({ navigation }: Props) {
       setSubmitting(false);
     }
   }, [
+    achievementDifficulty,
     achievabilityCritique,
     addGoal,
     goalType,
@@ -367,7 +390,7 @@ export function AddGoalScreen({ navigation }: Props) {
           <TextInput
             value={shortTitle}
             onChangeText={setShortTitle}
-            placeholder="e.g. Run a 5K race"
+            placeholder="e.g. Get in shape"
             placeholderTextColor={colors.textSecondary}
             style={[
               styles.input,
@@ -413,7 +436,7 @@ export function AddGoalScreen({ navigation }: Props) {
           <TextInput
             value={specifics}
             onChangeText={setSpecifics}
-            placeholder="Add context and detail…"
+            placeholder="e.g. I want to improve my physique by losing weight in a sustainable way."
             placeholderTextColor={colors.textSecondary}
             multiline
             textAlignVertical="top"
@@ -429,15 +452,61 @@ export function AddGoalScreen({ navigation }: Props) {
           />
           <Pressable
             accessibilityRole="button"
-            onPress={() => void afterSpecificContinue()}
-            disabled={!specificOk || busy}
+            onPress={() => specificOk && setPhase('difficulty')}
+            disabled={!specificOk}
+            style={({ pressed }) => [
+              styles.primaryBtn,
+              {
+                backgroundColor: specificOk ? colors.primary : colors.border,
+              },
+              pressed && specificOk && { opacity: 0.9 },
+            ]}
+          >
+            <Text
+              style={[
+                styles.primaryBtnLabel,
+                { color: specificOk ? '#ffffff' : colors.textSecondary },
+              ]}
+            >
+              Continue
+            </Text>
+          </Pressable>
+        </>
+      );
+    }
+
+    if (phase === 'difficulty') {
+      return (
+        <>
+          {assistantLine('What makes this goal difficult for you to achieve?')}
+          <TextInput
+            value={achievementDifficulty}
+            onChangeText={setAchievementDifficulty}
+            placeholder="e.g. I struggle to stay consistent with dieting when work gets busy."
+            placeholderTextColor={colors.textSecondary}
+            multiline
+            textAlignVertical="top"
+            style={[
+              styles.input,
+              styles.inputMultiline,
+              {
+                color: colors.text,
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.border,
+              },
+            ]}
+          />
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void afterDifficultyContinue()}
+            disabled={!difficultyOk || busy}
             style={({ pressed }) => [
               styles.primaryBtn,
               {
                 backgroundColor:
-                  specificOk && !busy ? colors.primary : colors.border,
+                  difficultyOk && !busy ? colors.primary : colors.border,
               },
-              pressed && specificOk && !busy && { opacity: 0.9 },
+              pressed && difficultyOk && !busy && { opacity: 0.9 },
             ]}
           >
             {busy ? (
@@ -446,7 +515,7 @@ export function AddGoalScreen({ navigation }: Props) {
               <Text
                 style={[
                   styles.primaryBtnLabel,
-                  { color: specificOk ? '#ffffff' : colors.textSecondary },
+                  { color: difficultyOk ? '#ffffff' : colors.textSecondary },
                 ]}
               >
                 Continue
