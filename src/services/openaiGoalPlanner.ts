@@ -367,9 +367,15 @@ const DAILY_QUEST_PROXIMITY_RULES = `Outcome proximity (critical—use completed
 - Tier guide (adapt to the goal; not a rigid script):
   - **0 milestones completed:** farthest from the outcome—skills, research, environment, private rehearsal, self-contained prep.
   - **1 milestone completed:** real-world **low-stakes** exposure in the **domain** of the goal.
-  - **2+ milestones completed:** **outcome-adjacent** actions—what a reasonable person reads as *directly practicing the goal* (still one-day sized, still smaller than a full milestone). For relationship, dating, or romance-aligned goals when the title implies it: progress from generic socializing toward **interest-based** interaction (e.g. genuine compliment, brief one-on-one chat, express interest, low-pressure invite)—not perpetual prep. For reading, fitness, etc., move toward the measurable core of that goal.
+  - **2+ milestones completed:** **outcome-adjacent** actions—what a reasonable person reads as *directly practicing the goal* (still one-day sized, still smaller than a full milestone; **outcome closeness is not the same as maximum one-day difficulty**—see Timeframe and realism). For relationship, dating, or romance-aligned goals when the title implies it: progress from generic socializing toward **interest-based** interaction (e.g. genuine compliment, brief one-on-one chat, express interest, low-pressure invite)—not perpetual prep. For reading, fitness, etc., move toward the measurable core of that goal.
 - **Milestones:** dailies stay easier than checkpoints, but at higher completedCheckpointCount they may be **mini-versions in spirit** of the **next** upcoming milestones—same path, smaller step; never copy a milestone label verbatim.
 - **Respect and safety (brief):** consent, mutual interest, appropriate public or social contexts, no pressure, no harassment; respect boundaries and "no."`;
+
+const DAILY_QUEST_RUNWAY_REALISM_RULES = `Timeframe and realism (user message includes "todayIso" and "targetDateIso"):
+- Each daily quest must stay **human-scale for one day**: doable in the described time (align with durationMinutes; do not imply an all-day ordeal or a life outcome in a single session).
+- **High completedCheckpointCount does not** justify **nearly impossible** or elite one-day demands. Proximity to the goal means **relevant, direct** steps—not a fantasy jump in volume, skill, or outcome (e.g. no first-time ultra-endurance feats, no “guaranteed” relationship results, no brand-new expert-level performance unless the user’s description shows that baseline).
+- Use **todayIso** vs **targetDateIso**: if the deadline is **soon**, prefer **smaller, verifiable** steps that still match the goal; if the deadline is **far**, still keep each quest a **modest single-day** action—do not assign future-level work in one day.
+- Increase load **gradually** (a few more minutes, reps, pages, or one extra social step)—not jumps that assume weeks of unstated training.`;
 
 const REGEN_ANTI_REPETITION_RULES = `Replace mode (applies when user JSON has "replacePreviousQuests": true and a non-empty "previousDailyQuests" array):
 - That array lists the **old** daily quests being **fully replaced**. You must output a **new** set of quests, not a light revision.
@@ -405,9 +411,11 @@ ${DAILY_QUEST_COPY_AND_TIER_RULES}
 
 ${DAILY_QUEST_PROXIMITY_RULES}
 
+${DAILY_QUEST_RUNWAY_REALISM_RULES}
+
 Rules:
 - Use the user's title and description; make SMART fields concrete.
-- If completedCheckpointCount is 0, daily quests must be VERY EASY (5–15 min, low friction), following the zero-baseline and ramp rules above. If higher, increase **proximity to the goal outcome** and difficulty/points modestly (still safe and actionable) per the Outcome proximity block above.
+- If completedCheckpointCount is 0, daily quests must be VERY EASY (5–15 min, low friction), following the zero-baseline and ramp rules above. If higher, increase **proximity to the goal outcome** and difficulty/points modestly (still safe and actionable) per the Outcome proximity and **Timeframe and realism** blocks above—never near-impossible single-day quests.
 - Checkpoints must align with the goal, deadline, and milestoneFrequency from the user message.
 - dailyQuests must be specific to this goal’s title and description (not generic self-help).
 - Each dailyQuest "points" MUST be exactly one of 10, 15, 20, or 25 (use different values across quests when possible).
@@ -430,10 +438,12 @@ ${DAILY_QUEST_COPY_AND_TIER_RULES}
 
 ${DAILY_QUEST_PROXIMITY_RULES}
 
+${DAILY_QUEST_RUNWAY_REALISM_RULES}
+
 ${REGEN_ANTI_REPETITION_RULES}
 
 Rules:
-- The user JSON includes "checkpointTitles" and (when present) "upcomingCheckpointTitles" and "totalCheckpointCount". Daily quests must be **smaller** than full milestones, **support** the path to upcoming milestones, and **increase closeness to the goal** as completedCheckpointCount rises (see Outcome proximity). They must **not** duplicate a milestone’s wording. Use completedCheckpointCount, upcoming checkpoints, and **not** only generic "prep" at high progress.
+- The user JSON includes "checkpointTitles" and (when present) "upcomingCheckpointTitles" and "totalCheckpointCount". Daily quests must be **smaller** than full milestones, **support** the path to upcoming milestones, and **increase closeness to the goal** as completedCheckpointCount rises (see Outcome proximity). They must **not** duplicate a milestone’s wording. Use completedCheckpointCount, upcoming checkpoints, and **not** only generic "prep" at high progress. Always respect **Timeframe and realism**: one-day achievable, not nearly impossible even at high milestones.
 - The user message includes milestoneFrequency (weekly / biweekly / monthly). Align daily quest pacing and tone with that cadence (e.g. smaller daily steps when milestones are weekly vs monthly).
 - Quests must support the user's goal and build skills toward the **next** milestones the user has not yet reached.
 - If completedCheckpointCount is 0, quests are VERY EASY, following the zero-baseline and ramp rules above. Higher counts follow **Outcome proximity**—still **below** the bar of a full milestone challenge.
