@@ -9,8 +9,9 @@ import React, {
 } from 'react';
 
 import { SEED_ACTIVE_GOALS } from '../data/mockGoal';
-import { getItemScopedWithLegacyMigrate, setItemScoped } from '../lib/userScopedStorage';
-import { loadLifeScheduleSlots, saveLifeScheduleSlots } from '../services/lifeScheduleSlots';
+import { fetchGoalsForUser, syncGoalsForUser } from '../services/supabase/goalsRepository';
+import { fetchLifeScheduleSlots, replaceLifeScheduleSlots } from '../services/supabase/lifeScheduleRepository';
+import { migrateLegacyLocalData } from '../services/supabase/legacyMigration';
 import {
   parseLifeBusySlotsFromMessage,
   regenerateDailyQuests,
@@ -21,13 +22,8 @@ import type {
   PlannerDailyQuest,
   ReservedScheduleSlot,
 } from '../services/openaiGoalPlanner';
-import {
-  Checkpoint,
-  Goal,
-  GoalPriority,
-  MilestoneFrequency,
-  Quest,
-} from '../types';
+import { Goal, GoalPriority, MilestoneFrequency, Quest } from '../types';
+import { parseMilestoneFrequency } from '../utils/goalNormalize';
 import {
   clampScheduleDurationMinutes,
   clampScheduleStartMinute,
@@ -36,8 +32,6 @@ import {
 import { dailyQuestCountForPriority, parseGoalPriority } from '../utils/goalPriority';
 
 import { useAuthUser } from './AuthUserContext';
-
-const GOALS_STORAGE_BASE_KEY = '@goalkeeper/active-goals-v1';
 
 export type NewGoalInput = {
   title: string;
@@ -54,7 +48,7 @@ export type AddGoalOptions = {
 
 type ActiveGoalsContextValue = {
   goals: Goal[];
-  /** True after the first load from AsyncStorage (or decision to keep seed data). */
+  /** True after the first load from Supabase (or seed bootstrap for a new account). */
   goalsStorageReady: boolean;
   addGoal: (input: NewGoalInput, options?: AddGoalOptions) => void;
   getGoalById: (id: string) => Goal | undefined;
@@ -72,125 +66,6 @@ type ActiveGoalsContextValue = {
 };
 
 const ActiveGoalsContext = createContext<ActiveGoalsContextValue | null>(null);
-
-function parseMilestoneFrequency(raw: unknown): MilestoneFrequency {
-  if (raw === 'weekly' || raw === 'biweekly' || raw === 'monthly') {
-    return raw;
-  }
-  return 'weekly';
-}
-
-function normalizeQuest(raw: unknown): Quest | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const o = raw as Record<string, unknown>;
-  if (typeof o.id !== 'string' || typeof o.title !== 'string') return null;
-  if (typeof o.description !== 'string') return null;
-  const points = o.points;
-  const kind = o.kind;
-  if (typeof points !== 'number' || !Number.isFinite(points)) return null;
-  if (kind !== 'daily' && kind !== 'weekly') return null;
-  const dayOrderRaw = o.dayOrder;
-  const dayOrder =
-    typeof dayOrderRaw === 'number' && Number.isFinite(dayOrderRaw)
-      ? Math.min(999, Math.max(0, Math.round(dayOrderRaw)))
-      : undefined;
-  const scheduleStartRaw = o.scheduleStartMinute;
-  const scheduleStartMinute =
-    typeof scheduleStartRaw === 'number' && Number.isFinite(scheduleStartRaw)
-      ? Math.min(1439, Math.max(0, Math.round(scheduleStartRaw)))
-      : undefined;
-  const scheduleDurRaw = o.scheduleDurationMinutes;
-  const scheduleDurationMinutes =
-    typeof scheduleDurRaw === 'number' && Number.isFinite(scheduleDurRaw)
-      ? Math.min(120, Math.max(15, Math.round(scheduleDurRaw)))
-      : undefined;
-  return {
-    id: o.id,
-    title: o.title,
-    description: o.description,
-    points,
-    kind,
-    ...(dayOrder !== undefined ? { dayOrder } : {}),
-    ...(scheduleStartMinute !== undefined ? { scheduleStartMinute } : {}),
-    ...(scheduleDurationMinutes !== undefined ? { scheduleDurationMinutes } : {}),
-  };
-}
-
-function normalizeCheckpoint(raw: unknown): Checkpoint | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const o = raw as Record<string, unknown>;
-  if (typeof o.id !== 'string' || typeof o.title !== 'string') return null;
-  return {
-    id: o.id,
-    title: o.title,
-    done: typeof o.done === 'boolean' ? o.done : false,
-  };
-}
-
-function normalizeGoal(raw: unknown): Goal | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const o = raw as Record<string, unknown>;
-  if (
-    typeof o.id !== 'string' ||
-    typeof o.title !== 'string' ||
-    typeof o.description !== 'string' ||
-    typeof o.specific !== 'string' ||
-    typeof o.measurable !== 'string' ||
-    typeof o.achievable !== 'string' ||
-    typeof o.relevant !== 'string' ||
-    typeof o.timeBound !== 'string'
-  ) {
-    return null;
-  }
-  if (!Array.isArray(o.checkpoints)) return null;
-  const checkpoints = o.checkpoints
-    .map(normalizeCheckpoint)
-    .filter((c): c is Checkpoint => c !== null);
-
-  let dailyQuests: Quest[] | undefined;
-  if (Array.isArray(o.dailyQuests)) {
-    const dq = o.dailyQuests.map(normalizeQuest).filter((q): q is Quest => q !== null);
-    if (dq.length > 0) dailyQuests = dq;
-  }
-
-  return {
-    id: o.id,
-    title: o.title,
-    description: o.description,
-    specific: o.specific,
-    measurable: o.measurable,
-    achievable: o.achievable,
-    relevant: o.relevant,
-    timeBound: o.timeBound,
-    targetDateIso: typeof o.targetDateIso === 'string' ? o.targetDateIso : undefined,
-    priority: parseGoalPriority(o.priority),
-    milestoneFrequency: parseMilestoneFrequency(o.milestoneFrequency),
-    achievabilityCritique:
-      typeof o.achievabilityCritique === 'string' && o.achievabilityCritique.trim()
-        ? o.achievabilityCritique.trim()
-        : undefined,
-    checkpoints,
-    dailyQuests,
-    completed: typeof o.completed === 'boolean' ? o.completed : false,
-  };
-}
-
-async function loadGoalsFromStorage(userId: string | null): Promise<Goal[] | null> {
-  try {
-    const raw = await getItemScopedWithLegacyMigrate(GOALS_STORAGE_BASE_KEY, userId);
-    if (raw === null) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    const goals = parsed.map(normalizeGoal).filter((g): g is Goal => g !== null);
-    return goals;
-  } catch {
-    return null;
-  }
-}
-
-async function saveGoalsToStorage(goals: Goal[], userId: string | null): Promise<void> {
-  await setItemScoped(GOALS_STORAGE_BASE_KEY, userId, JSON.stringify(goals));
-}
 
 function mergeDailyQuestSchedule(
   fullQuests: Quest[],
@@ -320,32 +195,34 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!authReady) return;
-    lifeSlotsHydrated.current = false;
-    let cancelled = false;
-    void loadLifeScheduleSlots(userId).then((slots) => {
-      if (cancelled) return;
-      setLifeScheduleSlots(slots);
-      lifeScheduleSlotsRef.current = slots;
+    if (userId === null) {
+      setGoals([...SEED_ACTIVE_GOALS]);
+      setLifeScheduleSlots([]);
+      lifeScheduleSlotsRef.current = [];
       lifeSlotsHydrated.current = true;
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, authReady]);
-
-  useEffect(() => {
-    if (!authReady || !lifeSlotsHydrated.current) return;
-    void saveLifeScheduleSlots(userId, lifeScheduleSlots);
-  }, [lifeScheduleSlots, authReady, userId]);
-
-  useEffect(() => {
-    if (!authReady) return;
+      setStorageReady(true);
+      return;
+    }
+    lifeSlotsHydrated.current = false;
     let cancelled = false;
     setStorageReady(false);
     void (async () => {
-      const loaded = await loadGoalsFromStorage(userId);
+      await migrateLegacyLocalData(userId);
       if (cancelled) return;
-      setGoals(loaded !== null ? loaded : [...SEED_ACTIVE_GOALS]);
+      const [loadedGoals, slots] = await Promise.all([
+        fetchGoalsForUser(userId),
+        fetchLifeScheduleSlots(userId),
+      ]);
+      if (cancelled) return;
+      let nextGoals = loadedGoals;
+      if (nextGoals.length === 0) {
+        nextGoals = [...SEED_ACTIVE_GOALS];
+        await syncGoalsForUser(userId, nextGoals);
+      }
+      setGoals(nextGoals);
+      setLifeScheduleSlots(slots);
+      lifeScheduleSlotsRef.current = slots;
+      lifeSlotsHydrated.current = true;
       setStorageReady(true);
     })();
     return () => {
@@ -354,8 +231,19 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
   }, [userId, authReady]);
 
   useEffect(() => {
-    if (!authReady || !storageReady) return;
-    void saveGoalsToStorage(goals, userId);
+    if (!authReady || userId === null || !lifeSlotsHydrated.current) return;
+    const t = setTimeout(() => {
+      void replaceLifeScheduleSlots(userId, lifeScheduleSlots);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [lifeScheduleSlots, authReady, userId]);
+
+  useEffect(() => {
+    if (!authReady || userId === null || !storageReady) return;
+    const t = setTimeout(() => {
+      void syncGoalsForUser(userId, goals);
+    }, 400);
+    return () => clearTimeout(t);
   }, [goals, storageReady, authReady, userId]);
 
   useEffect(() => {
@@ -555,7 +443,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       );
 
       // Intentionally no regenerateDailyQuests here on checkpoint complete: replacing daily
-      // quest ids would orphan AsyncStorage quest completion keys and clear "done" state in the UI.
+      // quest ids would orphan quest_completions rows and clear "done" state in the UI.
 
       return nextGoals;
     });

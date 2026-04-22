@@ -9,8 +9,14 @@ import React, {
 } from 'react';
 
 import { mockDailyQuests, mockWeeklyQuests } from '../data/mockQuests';
-import { getItemScopedWithLegacyMigrate, setItemScoped } from '../lib/userScopedStorage';
 import { useDailyStreakAndPointsToday } from '../hooks/useDailyStreakAndPointsToday';
+import {
+  fetchGoalBarEarnedMap,
+  fetchQuestCompletionsMap,
+  upsertGoalBarEarned,
+  upsertQuestCompletion,
+} from '../services/supabase/questProgressRepository';
+import { fetchOrSeedWeeklyQuests } from '../services/supabase/weeklyQuestsRepository';
 import type { Quest } from '../types';
 import { resolveQuestScheduleBlock } from '../utils/dailyQuestSchedule';
 
@@ -31,9 +37,6 @@ function compareDailyEntriesByScheduleTime(a: DailyQuestEntry, b: DailyQuestEntr
   if (goalCmp !== 0) return goalCmp;
   return a.quest.id.localeCompare(b.quest.id);
 }
-
-const QUEST_COMPLETED_BASE_KEY = '@goalkeeper/quest-completed-v1';
-const GOAL_BAR_EARNED_BASE_KEY = '@goalkeeper/goal-bar-earned-v1';
 
 export type DailyQuestEntry = {
   goalId: string;
@@ -57,52 +60,6 @@ type QuestProgressValue = {
 
 const QuestProgressContext = createContext<QuestProgressValue | null>(null);
 
-async function loadCompleted(userId: string | null): Promise<Record<string, boolean>> {
-  try {
-    const raw = await getItemScopedWithLegacyMigrate(QUEST_COMPLETED_BASE_KEY, userId);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== 'object') return {};
-    const out: Record<string, boolean> = {};
-    for (const [k, v] of Object.entries(parsed)) {
-      if (typeof v === 'boolean') out[k] = v;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-async function saveCompleted(
-  userId: string | null,
-  map: Record<string, boolean>,
-): Promise<void> {
-  await setItemScoped(QUEST_COMPLETED_BASE_KEY, userId, JSON.stringify(map));
-}
-
-async function loadGoalBarEarned(userId: string | null): Promise<Record<string, number>> {
-  try {
-    const raw = await getItemScopedWithLegacyMigrate(GOAL_BAR_EARNED_BASE_KEY, userId);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== 'object') return {};
-    const out: Record<string, number> = {};
-    for (const [k, v] of Object.entries(parsed)) {
-      if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-async function saveGoalBarEarned(
-  userId: string | null,
-  map: Record<string, number>,
-): Promise<void> {
-  await setItemScoped(GOAL_BAR_EARNED_BASE_KEY, userId, JSON.stringify(map));
-}
-
 export function QuestProgressProvider({ children }: { children: React.ReactNode }) {
   const { userId, authReady } = useAuthUser();
   const { goals } = useActiveGoals();
@@ -110,6 +67,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
     useDailyStreakAndPointsToday(userId, authReady);
   const [completed, setCompleted] = useState<Record<string, boolean>>({});
   const [goalBarEarned, setGoalBarEarned] = useState<Record<string, number>>({});
+  const [weeklyQuests, setWeeklyQuests] = useState<Quest[]>(mockWeeklyQuests);
   const completedRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -142,7 +100,20 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
     [dailyQuestEntries],
   );
 
-  const weeklyQuests = mockWeeklyQuests;
+  useEffect(() => {
+    if (!authReady) return;
+    if (userId === null) {
+      setWeeklyQuests(mockWeeklyQuests);
+      return;
+    }
+    let cancelled = false;
+    void fetchOrSeedWeeklyQuests(userId).then((w) => {
+      if (!cancelled) setWeeklyQuests(w);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, authReady]);
 
   const allQuestsForToggle = useMemo(
     () => [...dailyQuests, ...weeklyQuests],
@@ -151,17 +122,20 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     if (!authReady) return;
+    if (userId === null) {
+      setCompleted({});
+      setGoalBarEarned({});
+      return;
+    }
     let cancelled = false;
-    (async () => {
-      const [cMap, eMap] = await Promise.all([
-        loadCompleted(userId),
-        loadGoalBarEarned(userId),
-      ]);
-      if (!cancelled) {
-        setCompleted(cMap);
-        setGoalBarEarned(eMap);
-      }
-    })();
+    void Promise.all([fetchQuestCompletionsMap(userId), fetchGoalBarEarnedMap(userId)]).then(
+      ([cMap, eMap]) => {
+        if (!cancelled) {
+          setCompleted(cMap);
+          setGoalBarEarned(eMap);
+        }
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -184,14 +158,17 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
         setGoalBarEarned((prevEarned) => {
           const nextEarned = { ...prevEarned };
           const cur = nextEarned[entry.goalId] ?? 0;
-          nextEarned[entry.goalId] = Math.max(0, cur + delta);
-          queueMicrotask(() => void saveGoalBarEarned(userId, nextEarned));
+          const earned = Math.max(0, cur + delta);
+          nextEarned[entry.goalId] = earned;
+          if (userId) {
+            queueMicrotask(() => void upsertGoalBarEarned(userId, entry.goalId, earned));
+          }
           return nextEarned;
         });
       }
 
       queueMicrotask(() => {
-        void saveCompleted(userId, nextMap);
+        if (userId) void upsertQuestCompletion(userId, id, nextCompleted);
         applyQuestToggle(quest, nextCompleted);
       });
     },

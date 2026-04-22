@@ -1,46 +1,17 @@
-import { getItemScopedWithLegacyMigrate, setItemScoped } from '../lib/userScopedStorage';
-
 import type { ReservedScheduleSlot } from './openaiGoalPlanner';
-
-const LIFE_SCHEDULE_SLOTS_BASE_KEY = '@goalkeeper/life-schedule-slots-v1';
-
-function normalizeSlot(s: ReservedScheduleSlot): ReservedScheduleSlot | null {
-  const start = Math.min(1439, Math.max(0, Math.round(s.startMinute)));
-  const end = Math.min(1440, Math.max(0, Math.round(s.endMinute)));
-  if (end <= start) return null;
-  return { startMinute: start, endMinute: end };
-}
+import { fetchLifeScheduleSlots, replaceLifeScheduleSlots } from './supabase/lifeScheduleRepository';
 
 export async function loadLifeScheduleSlots(
   userId: string | null,
 ): Promise<ReservedScheduleSlot[]> {
-  try {
-    const raw = await getItemScopedWithLegacyMigrate(LIFE_SCHEDULE_SLOTS_BASE_KEY, userId);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    const out: ReservedScheduleSlot[] = [];
-    for (const x of parsed) {
-      if (!x || typeof x !== 'object') continue;
-      const o = x as Record<string, unknown>;
-      const sm = o.startMinute;
-      const em = o.endMinute;
-      if (typeof sm !== 'number' || typeof em !== 'number') continue;
-      const n = normalizeSlot({ startMinute: sm, endMinute: em });
-      if (n) out.push(n);
-    }
-    return out;
-  } catch {
-    return [];
-  }
+  if (userId === null) return [];
+  return fetchLifeScheduleSlots(userId);
 }
 
 export async function saveLifeScheduleSlots(
   userId: string | null,
   slots: ReservedScheduleSlot[],
 ): Promise<void> {
-  const normalized = slots
-    .map((s) => normalizeSlot(s))
-    .filter((x): x is ReservedScheduleSlot => x != null);
-  await setItemScoped(LIFE_SCHEDULE_SLOTS_BASE_KEY, userId, JSON.stringify(normalized));
+  if (userId === null) return;
+  await replaceLifeScheduleSlots(userId, slots);
 }
