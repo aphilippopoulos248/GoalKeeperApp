@@ -351,3 +351,123 @@ export async function fetchRecipeSuggestionsForAssist(params: {
   if (!Array.isArray(results) || results.length === 0) return null;
   return complexToAssistRecipes(results.slice(0, 6));
 }
+
+/** Resolve a Spoonacular recipe id from a free-text title (first search hit). */
+export async function searchRecipeIdByTitle(title: string): Promise<number | null> {
+  const q = title.trim();
+  if (!q) return null;
+  const apiKey = getSpoonacularApiKey();
+  if (!apiKey) return null;
+  const sp = new URLSearchParams({
+    query: q,
+    number: '1',
+    addRecipeInformation: 'false',
+  });
+  const data = (await getJson('/recipes/complexSearch', sp, apiKey)) as
+    | { results?: Array<{ id?: number }> }
+    | null;
+  const id = data?.results?.[0]?.id;
+  return typeof id === 'number' && Number.isFinite(id) ? id : null;
+}
+
+function formatNutritionWidgetJson(data: unknown): string | null {
+  if (!data || typeof data !== 'object') return null;
+  const o = data as Record<string, unknown>;
+  const lines: string[] = [];
+
+  const nutrients = o.nutrients;
+  if (Array.isArray(nutrients) && nutrients.length > 0) {
+    for (const n of nutrients) {
+      if (!n || typeof n !== 'object') continue;
+      const r = n as Record<string, unknown>;
+      const name = r.name;
+      if (typeof name !== 'string' || !name.trim()) continue;
+      const amount = r.amount;
+      const unit = typeof r.unit === 'string' ? r.unit : '';
+      const pct = r.percentOfDailyNeeds;
+      let line: string;
+      if (typeof amount === 'number' && Number.isFinite(amount)) {
+        line = `• ${name}: ${amount}${unit ? ` ${unit}` : ''}`;
+        if (typeof pct === 'number' && Number.isFinite(pct)) {
+          line += ` (${Math.round(pct)}% daily)`;
+        }
+      } else if (typeof r.percentOfDailyNeeds === 'number') {
+        line = `• ${name}: ${Math.round(r.percentOfDailyNeeds as number)}% daily`;
+      } else {
+        continue;
+      }
+      lines.push(line);
+    }
+    if (lines.length > 0) {
+      return ['Per serving (Spoonacular estimate):', ...lines].join('\n');
+    }
+  }
+
+  const cal = o.calories;
+  const protein = o.protein;
+  const fat = o.fat;
+  const carbs = o.carbs;
+  if (typeof cal === 'string' && cal.trim()) lines.push(`• Calories: ${cal.trim()}`);
+  if (typeof protein === 'string' && protein.trim()) lines.push(`• Protein: ${protein.trim()}`);
+  if (typeof fat === 'string' && fat.trim()) lines.push(`• Fat: ${fat.trim()}`);
+  if (typeof carbs === 'string' && carbs.trim()) lines.push(`• Carbs: ${carbs.trim()}`);
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
+/**
+ * Human-readable nutrient list for a recipe id (nutritionWidget.json).
+ */
+export async function fetchRecipeNutritionSummary(recipeId: number): Promise<string | null> {
+  const apiKey = getSpoonacularApiKey();
+  if (!apiKey) return null;
+  const data = await getJson(
+    `/recipes/${recipeId}/nutritionWidget.json`,
+    new URLSearchParams(),
+    apiKey,
+  );
+  return formatNutritionWidgetJson(data);
+}
+
+export type RecentAssistRecipe = { id: number; title: string };
+
+/**
+ * Pick recipe id from planner hints, pronouns in the user message, and recipes already shown.
+ */
+export function resolveAssistNutritionRecipeId(params: {
+  explicitId: number | null | undefined;
+  titleHint: string | null | undefined;
+  recentRecipes: RecentAssistRecipe[];
+  userMessage: string;
+}): number | null {
+  if (typeof params.explicitId === 'number' && Number.isFinite(params.explicitId)) {
+    return params.explicitId;
+  }
+  const recent = params.recentRecipes;
+  if (recent.length === 0) return null;
+
+  const hint = (params.titleHint ?? '').trim();
+  if (hint) {
+    const hl = hint.toLowerCase();
+    const exact = recent.find((r) => r.title.trim().toLowerCase() === hl);
+    if (exact) return exact.id;
+    const partial = recent.find((r) => {
+      const t = r.title.toLowerCase();
+      return t.includes(hl) || hl.includes(t.slice(0, Math.min(16, t.length)));
+    });
+    if (partial) return partial.id;
+  }
+
+  const u = params.userMessage.toLowerCase();
+  if (/\b(first|1st)\b/.test(u)) return recent[0]!.id;
+  if (/\b(second|2nd)\b/.test(u) && recent.length >= 2) return recent[1]!.id;
+  if (
+    /\b(this|that)\s+(recipe|one)\b/.test(u) ||
+    /\bi\s+like\s+this\b/.test(u) ||
+    /\b(the\s+)?one\s+i\s+(picked|chose)\b/.test(u) ||
+    /\bhow\s+nutritious\b.*\b(it|this)\b/.test(u) ||
+    /\b(tell me|what).*\b(nutrition|nutrients|calories|macros)\b.*\b(it|this|that)\b/.test(u)
+  ) {
+    return recent[recent.length - 1]!.id;
+  }
+  return null;
+}

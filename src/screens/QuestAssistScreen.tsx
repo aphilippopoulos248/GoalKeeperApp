@@ -20,11 +20,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { MainStackParamList } from '../navigation/MainStack';
 import {
+  fallbackChatOnlyReply,
   fallbackQuestAssistIntro,
-  fetchQuestAssistReply,
+  planQuestAssistTurn,
+  type QuestAssistHistoryEntry,
 } from '../services/questAssistOpenai';
 import {
+  fetchRecipeNutritionSummary,
   fetchRecipeSuggestionsForAssist,
+  resolveAssistNutritionRecipeId,
+  searchRecipeIdByTitle,
   type AssistRecipe,
 } from '../services/spoonacularRecipes';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
@@ -41,6 +46,34 @@ type ChatRole = 'user' | 'assistant';
 type ChatMessage =
   | { id: string; role: ChatRole; text: string }
   | { id: string; role: 'assistant'; text: string; recipes?: AssistRecipe[] };
+
+function extractRecentRecipesFromMessages(messages: ChatMessage[]): {
+  id: number;
+  title: string;
+}[] {
+  const out: { id: number; title: string }[] = [];
+  for (const m of messages) {
+    if (m.role === 'assistant' && 'recipes' in m && m.recipes?.length) {
+      for (const r of m.recipes) {
+        out.push({ id: r.id, title: r.title });
+      }
+    }
+  }
+  return out;
+}
+
+function toPlannerHistory(messages: ChatMessage[]): QuestAssistHistoryEntry[] {
+  return messages.map((m) => {
+    if (m.role === 'user') {
+      return { role: 'user', text: m.text };
+    }
+    const ids =
+      'recipes' in m && m.recipes?.length
+        ? m.recipes.map((r) => r.id)
+        : undefined;
+    return { role: 'assistant', text: m.text, recipeIds: ids };
+  });
+}
 
 export function QuestAssistScreen() {
   const { colors } = useAppTheme();
@@ -135,36 +168,70 @@ export function QuestAssistScreen() {
   }, [goal, quest, introFade, introScale, inputFade]);
 
   const runAssist = useCallback(
-    async (userMessage: string) => {
+    async (allMessages: ChatMessage[]) => {
       if (!goal || !quest) return;
+      const last = allMessages[allMessages.length - 1];
+      if (!last || last.role !== 'user') return;
 
-      const recipes = await fetchRecipeSuggestionsForAssist({
+      const userMessage = last.text;
+      const prior = allMessages.slice(0, -1);
+      const recentRecipes = extractRecentRecipesFromMessages(prior);
+      const history = toPlannerHistory(prior);
+
+      const plan = await planQuestAssistTurn({
         goalTitle: goal.title,
         goalDescription: goal.description,
         goalTimeBound: goal.timeBound,
         questTitle: quest.title,
         questDescription: quest.description,
-        userMessage,
+        recentRecipes,
+        history,
+        latestUserMessage: userMessage,
       });
 
-      const aiText =
-        (await fetchQuestAssistReply({
+      let recipes: AssistRecipe[] | undefined;
+      let text = plan.reply.trim();
+
+      if (plan.intent === 'suggest_recipes') {
+        const list = await fetchRecipeSuggestionsForAssist({
           goalTitle: goal.title,
           goalDescription: goal.description,
           goalTimeBound: goal.timeBound,
           questTitle: quest.title,
           questDescription: quest.description,
           userMessage,
-          hasRecipeSuggestions: !!recipes && recipes.length > 0,
-        })) ?? fallbackQuestAssistIntro(!!recipes && recipes.length > 0);
+        });
+        recipes = list ?? undefined;
+        if (!text) text = fallbackQuestAssistIntro(!!recipes?.length);
+      } else if (plan.intent === 'nutrition_for_recipe') {
+        let rid = resolveAssistNutritionRecipeId({
+          explicitId: plan.nutritionRecipeId,
+          titleHint: plan.nutritionRecipeTitleHint,
+          recentRecipes,
+          userMessage,
+        });
+        if (rid == null && plan.nutritionRecipeTitleHint?.trim()) {
+          rid = await searchRecipeIdByTitle(plan.nutritionRecipeTitleHint.trim());
+        }
+        const nut = rid != null ? await fetchRecipeNutritionSummary(rid) : null;
+        if (nut) {
+          text = text ? `${text}\n\n${nut}` : nut;
+        } else {
+          text =
+            text ||
+            "I couldn’t load nutrition for that dish. Try naming the recipe, or pick one from the list above again.";
+        }
+      } else if (!text) {
+        text = fallbackChatOnlyReply();
+      }
 
       const assistantMsg: ChatMessage = {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        text: aiText,
-        recipes: recipes ?? undefined,
+        text,
+        recipes,
       };
-      setMessages((m) => [...m, assistantMsg]);
+      setMessages([...allMessages, assistantMsg]);
     },
     [goal, quest],
   );
@@ -178,14 +245,15 @@ export function QuestAssistScreen() {
       role: 'user',
       text: trimmed,
     };
-    setMessages((m) => [...m, userMsg]);
+    const nextThread = [...messages, userMsg];
+    setMessages(nextThread);
     setSending(true);
     try {
-      await runAssist(trimmed);
+      await runAssist(nextThread);
     } finally {
       setSending(false);
     }
-  }, [input, sending, introDone, runAssist]);
+  }, [input, sending, introDone, messages, runAssist]);
 
   if (!goal || !quest) {
     return null;
