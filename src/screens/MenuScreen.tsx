@@ -1,6 +1,12 @@
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
-import type { RouteProp } from '@react-navigation/native';
+import {
+  useFocusEffect,
+  useNavigation,
+  useRoute,
+  type CompositeNavigationProp,
+  type RouteProp,
+} from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Picker } from '@react-native-picker/picker';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
@@ -24,6 +30,7 @@ import {
   DailyQuestEntry,
   useQuestProgress,
 } from '../context/QuestProgressContext';
+import type { MainStackParamList } from '../navigation/MainStack';
 import type { RootTabParamList } from '../navigation/RootTabs';
 import type { GoalPriority } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -39,6 +46,11 @@ const DEBUG_NARRATIVE_ALERT_MAX = 4000;
 /** Per-section cap so combined alert text stays readable on device alerts. */
 const DEBUG_JOURNAL_SECTION_MAX = 2200;
 const ADMIN_PANEL_EMAIL = 'admin@example.com';
+
+type MenuScreenNavigation = CompositeNavigationProp<
+  BottomTabNavigationProp<RootTabParamList, 'Menu'>,
+  NativeStackNavigationProp<MainStackParamList>
+>;
 
 function truncateForDebugAlert(s: string, max = DEBUG_NARRATIVE_ALERT_MAX): string {
   if (s.length <= max) return s;
@@ -68,7 +80,7 @@ export function MenuScreen() {
   const { colors } = useAppTheme();
   const { userEmail } = useAuthUser();
   const showAdminPanel = userEmail === ADMIN_PANEL_EMAIL;
-  const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
+  const navigation = useNavigation<MenuScreenNavigation>();
   const route = useRoute<RouteProp<RootTabParamList, 'Menu'>>();
   const listRef = useRef<FlatList<DailyQuestEntry>>(null);
   const {
@@ -558,10 +570,16 @@ export function MenuScreen() {
           quest={entry.quest}
           completed={!!completed[entry.quest.id]}
           onToggle={() => toggleQuest(entry.quest.id)}
+          onAssistPress={() =>
+            navigation.navigate('QuestAssist', {
+              goalId: entry.goalId,
+              questId: entry.quest.id,
+            })
+          }
         />
       </View>
     ),
-    [colors, completed, toggleQuest],
+    [colors, completed, navigation, toggleQuest],
   );
 
   const listHeader = useMemo(

@@ -39,7 +39,8 @@ import { displayNameFromUser } from '../lib/userDisplayName';
 import { LoginScreen } from '../screens/LoginScreen';
 import { RegisterScreen } from '../screens/RegisterScreen';
 import { useAppTheme } from '../theme/ThemeProvider';
-import { RootTabs, type RootTabParamList } from './RootTabs';
+import { MainAppStack } from './MainStack';
+import { type RootTabParamList } from './RootTabs';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -149,7 +150,7 @@ function MainShell() {
 
   return (
     <View style={{ flex: 1 }}>
-      <RootTabs />
+      <MainAppStack />
       <PostLoginGreetingOverlay
         visible={ctx.showGreeting}
         preparing={preparing}

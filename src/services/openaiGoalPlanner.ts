@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 
 import type { GoalType, MilestoneFrequency, Quest } from '../types';
 import { parseGoalType } from '../utils/goalNormalize';
+import { getNutritionContextForGoal } from './spoonacularRecipes';
 
 export type PlannerDailyQuest = {
   title: string;
@@ -643,6 +644,24 @@ Rules:
 - Example for 3 quests: a morning habit ≈120, a lunch-related task ≈350, an evening wind-down ≈900; example schedule: startMinute 480 durationMinutes 30, 780/45, 1260/40.
 - Still a concrete action—never “go to sleep” as a quest.
 - You MUST return exactly ${n} items in dailyQuests (no fewer, no more).`;
+}
+
+const SPOONACULAR_PLANNER_RULES = `Spoonacular context (applies when the user message includes a non-empty string "spoonacularContext"):
+- That string lists **real** recipe or nutrition-filtered meal ideas from a live food API. Use it to make at least one daily quest **concrete** (cook, prep, shop for a named dish, or align a meal with a macro pattern shown in the list).
+- Prefer referring to a **dish title** (or a clear, close paraphrase) from the list. Do not invent other recipe names, chain restaurants, or branded products not in "spoonacularContext".
+- Keep the usual **goalType** rules: for "biological", do not promise a fixed per-week body-weight or body-fat outcome in quest text.
+- You may use other quest slots for complementary habits (timing, logging, prep environment) if they still fit the goal.`;
+
+function appendSpoonacularRules(
+  system: string,
+  spoonacularContext: string | null,
+): string {
+  if (typeof spoonacularContext === 'string' && spoonacularContext.trim().length > 0) {
+    return `${system}
+
+${SPOONACULAR_PLANNER_RULES}`;
+  }
+  return system;
 }
 
 function buildRegenSystem(dailyQuestCount: number, goalType: GoalType): string {
@@ -1309,6 +1328,16 @@ export async function planNewGoal(
     milestoneFrequency,
   );
 
+  let spoonacularContext: string | null = null;
+  try {
+    spoonacularContext = await getNutritionContextForGoal({
+      title: params.title,
+      description: params.description,
+    });
+  } catch {
+    spoonacularContext = null;
+  }
+
   const user = JSON.stringify({
     title: params.title,
     description: params.description,
@@ -1322,14 +1351,18 @@ export async function planNewGoal(
     expectedCheckpointCount: checkpointPlan.expectedCheckpointCount,
     expectedWeekOffsets: checkpointPlan.expectedWeekOffsets,
     reservedScheduleSlots: params.reservedScheduleSlots ?? [],
+    ...(spoonacularContext ? { spoonacularContext } : {}),
   });
 
   const runOnce = async (isRetry: boolean): Promise<GoalPlannerFullResult> => {
-    let system = buildFullSystem(
-      dailyQuestCount,
-      milestoneFrequency,
-      checkpointPlan,
-      goalType,
+    let system = appendSpoonacularRules(
+      buildFullSystem(
+        dailyQuestCount,
+        milestoneFrequency,
+        checkpointPlan,
+        goalType,
+      ),
+      spoonacularContext,
     );
     if (isRetry) {
       system += `
@@ -1371,6 +1404,17 @@ export async function regenerateDailyQuests(
     }));
   const replacePreviousQuests = previousDailyQuests.length > 0;
   const userProgressJournal = capUserProgressJournal(params.userProgressJournal);
+
+  let spoonacularContext: string | null = null;
+  try {
+    spoonacularContext = await getNutritionContextForGoal({
+      title: params.title,
+      description: params.description,
+    });
+  } catch {
+    spoonacularContext = null;
+  }
+
   const user = JSON.stringify({
     title: params.title,
     description: params.description,
@@ -1389,11 +1433,14 @@ export async function regenerateDailyQuests(
     userProgressJournal: userProgressJournal ?? null,
     /** Unique per request so the model treats each refresh as a new generation, not a tweak of the last. */
     regenerationRequestId: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+    ...(spoonacularContext ? { spoonacularContext } : {}),
   });
 
-  const data = await postChatJson(buildRegenSystem(dailyQuestCount, goalType), user, {
-    temperature: replacePreviousQuests ? 0.72 : 0.35,
-  });
+  const data = await postChatJson(
+    appendSpoonacularRules(buildRegenSystem(dailyQuestCount, goalType), spoonacularContext),
+    user,
+    { temperature: replacePreviousQuests ? 0.72 : 0.35 },
+  );
   return parseDailyOnly(data, dailyQuestCount, params.reservedScheduleSlots);
 }
 
