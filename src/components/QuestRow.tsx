@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import type { ReactNode } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { AssistFullExercise } from '../services/exerciseDbRapidApi';
@@ -16,9 +17,14 @@ type QuestRowProps = {
   onAssistPress?: () => void;
   /** Recipe the user saved from AI Assist for this quest. */
   attachedRecipe?: AssistFullRecipe;
+  /** Opens full recipe (e.g. modal). When omitted, the preview row is not tappable. */
+  onAttachedRecipePress?: () => void;
   /** Exercise the user saved from AI Assist for this quest. */
   attachedExercise?: AssistFullExercise;
 };
+
+/** Checkbox width + `rowInner` gap; aligns attachment rows with quest title text. */
+const ATTACHED_BLOCK_INDENT = 22 + spacing.md;
 
 export function QuestRow({
   quest,
@@ -27,10 +33,60 @@ export function QuestRow({
   variant = 'default',
   onAssistPress,
   attachedRecipe,
+  onAttachedRecipePress,
   attachedExercise,
 }: QuestRowProps) {
   const { colors } = useAppTheme();
   const isInCard = variant === 'inCard';
+
+  let attachedRecipeBlock: ReactNode = null;
+  if (attachedRecipe) {
+    const preview = (
+      <View
+        style={[
+          styles.savedRecipeRow,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        {attachedRecipe.image ? (
+          <Image
+            source={{ uri: attachedRecipe.image }}
+            style={styles.savedRecipeThumb}
+          />
+        ) : null}
+        <View style={styles.savedRecipeCopy}>
+          <View style={styles.savedRecipeLabelRow}>
+            <Ionicons name="star" size={14} color={colors.primary} />
+            <Text style={[styles.savedRecipeLabel, { color: colors.textSecondary }]}>
+              Saved recipe
+            </Text>
+          </View>
+          <Text
+            style={[styles.savedRecipeTitle, { color: colors.text }]}
+            numberOfLines={1}
+          >
+            {attachedRecipe.title}
+          </Text>
+        </View>
+      </View>
+    );
+    attachedRecipeBlock = (
+      <View style={{ paddingLeft: ATTACHED_BLOCK_INDENT }}>
+        {onAttachedRecipePress ? (
+          <Pressable
+            onPress={onAttachedRecipePress}
+            style={({ pressed }) => [{ opacity: pressed ? 0.88 : 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel={`View saved recipe: ${attachedRecipe.title}`}
+          >
+            {preview}
+          </Pressable>
+        ) : (
+          preview
+        )}
+      </View>
+    );
+  }
 
   return (
     <View
@@ -45,66 +101,42 @@ export function QuestRow({
         },
       ]}
     >
-      <Pressable
-        onPress={onToggle}
-        style={({ pressed }) => [
-          styles.rowInner,
-          { flex: 1, opacity: pressed ? 0.92 : 1 },
-        ]}
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: completed }}
-      >
-        <View
-          style={[
-            styles.checkbox,
-            {
-              borderColor: completed ? colors.success : colors.border,
-              backgroundColor: completed ? colors.success : 'transparent',
-            },
+      <View style={styles.mainColumn}>
+        <Pressable
+          onPress={onToggle}
+          style={({ pressed }) => [
+            styles.rowInner,
+            { opacity: pressed ? 0.92 : 1 },
           ]}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: completed }}
         >
-          {completed ? (
-            <Ionicons name="checkmark" size={16} color="#ffffff" />
-          ) : null}
-        </View>
-        <View style={styles.copy}>
-          <Text style={[styles.title, { color: colors.text }]}>{quest.title}</Text>
-          <Text style={[styles.desc, { color: colors.textSecondary }]}>
-            {quest.description}
-          </Text>
-          <Text style={[styles.points, { color: colors.primary }]}>
-            +{quest.points} pts
-          </Text>
-          {attachedRecipe ? (
-            <View
-              style={[
-                styles.savedRecipeRow,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              {attachedRecipe.image ? (
-                <Image
-                  source={{ uri: attachedRecipe.image }}
-                  style={styles.savedRecipeThumb}
-                />
-              ) : null}
-              <View style={styles.savedRecipeCopy}>
-                <View style={styles.savedRecipeLabelRow}>
-                  <Ionicons name="star" size={14} color={colors.primary} />
-                  <Text style={[styles.savedRecipeLabel, { color: colors.textSecondary }]}>
-                    Saved recipe
-                  </Text>
-                </View>
-                <Text
-                  style={[styles.savedRecipeTitle, { color: colors.text }]}
-                  numberOfLines={1}
-                >
-                  {attachedRecipe.title}
-                </Text>
-              </View>
-            </View>
-          ) : null}
-          {attachedExercise ? (
+          <View
+            style={[
+              styles.checkbox,
+              {
+                borderColor: completed ? colors.success : colors.border,
+                backgroundColor: completed ? colors.success : 'transparent',
+              },
+            ]}
+          >
+            {completed ? (
+              <Ionicons name="checkmark" size={16} color="#ffffff" />
+            ) : null}
+          </View>
+          <View style={styles.copy}>
+            <Text style={[styles.title, { color: colors.text }]}>{quest.title}</Text>
+            <Text style={[styles.desc, { color: colors.textSecondary }]}>
+              {quest.description}
+            </Text>
+            <Text style={[styles.points, { color: colors.primary }]}>
+              +{quest.points} pts
+            </Text>
+          </View>
+        </Pressable>
+        {attachedRecipeBlock}
+        {attachedExercise ? (
+          <View style={{ paddingLeft: ATTACHED_BLOCK_INDENT }}>
             <View
               style={[
                 styles.savedRecipeRow,
@@ -132,9 +164,9 @@ export function QuestRow({
                 </Text>
               </View>
             </View>
-          ) : null}
-        </View>
-      </Pressable>
+          </View>
+        ) : null}
+      </View>
       {onAssistPress ? (
         <Pressable
           onPress={onAssistPress}
@@ -174,10 +206,12 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm + 2,
     gap: spacing.sm,
   },
+  mainColumn: {
+    flex: 1,
+  },
   rowInner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    flex: 1,
     gap: spacing.md,
   },
   assistBtn: {

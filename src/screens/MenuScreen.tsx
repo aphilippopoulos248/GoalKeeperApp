@@ -21,6 +21,7 @@ import {
   View,
 } from 'react-native';
 
+import { AttachedRecipeModal } from '../components/AttachedRecipeModal';
 import { DailyQuestProgressCard } from '../components/DailyQuestProgressCard';
 import { QuestRow } from '../components/QuestRow';
 import { Screen } from '../components/Screen';
@@ -32,6 +33,7 @@ import {
 } from '../context/QuestProgressContext';
 import type { MainStackParamList } from '../navigation/MainStack';
 import type { RootTabParamList } from '../navigation/RootTabs';
+import type { AssistFullRecipe } from '../services/spoonacularRecipes';
 import type { GoalPriority } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
@@ -110,6 +112,9 @@ export function MenuScreen() {
   const [attachedByQuest, setAttachedByQuest] = useState<QuestAttachedRecipeMap>({});
   const [attachedExerciseByQuest, setAttachedExerciseByQuest] =
     useState<QuestAttachedExerciseMap>({});
+  const [attachedRecipeViewer, setAttachedRecipeViewer] = useState<AssistFullRecipe | null>(
+    null,
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -608,6 +613,12 @@ export function MenuScreen() {
           completed={!!completed[entry.quest.id]}
           onToggle={() => toggleQuest(entry.quest.id)}
           attachedRecipe={attachedByQuest[entry.goalId]?.[entry.quest.id]}
+          onAttachedRecipePress={
+            attachedByQuest[entry.goalId]?.[entry.quest.id]
+              ? () =>
+                  setAttachedRecipeViewer(attachedByQuest[entry.goalId]![entry.quest.id]!)
+              : undefined
+          }
           attachedExercise={attachedExerciseByQuest[entry.goalId]?.[entry.quest.id]}
           onAssistPress={() =>
             navigation.navigate('QuestAssist', {
@@ -618,7 +629,15 @@ export function MenuScreen() {
         />
       </View>
     ),
-    [attachedByQuest, attachedExerciseByQuest, colors, completed, navigation, toggleQuest],
+    [
+      attachedByQuest,
+      attachedExerciseByQuest,
+      colors,
+      completed,
+      navigation,
+      setAttachedRecipeViewer,
+      toggleQuest,
+    ],
   );
 
   const listHeader = useMemo(
@@ -707,6 +726,10 @@ export function MenuScreen() {
             });
           }, 200);
         }}
+      />
+      <AttachedRecipeModal
+        recipe={attachedRecipeViewer}
+        onClose={() => setAttachedRecipeViewer(null)}
       />
     </Screen>
   );
