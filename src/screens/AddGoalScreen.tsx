@@ -30,6 +30,7 @@ import type { GoalPriority, GoalType, MilestoneFrequency } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 import { measurementTargetAlreadySpecified } from '../utils/goalQuantificationHeuristics';
+import { recommendedGoalTypeFromText } from '../utils/goalTypeHeuristics';
 import { mergeLifeSlotsWithOccupiedGoals } from '../utils/dailyQuestSchedule';
 import { dailyQuestCountForPriority } from '../utils/goalPriority';
 
@@ -137,6 +138,19 @@ export function AddGoalScreen({ navigation }: Props) {
       milestoneFrequencyForHorizonDays(calendarDaysFromTodayTo(targetDate)),
     );
   }, [targetDate]);
+
+  const combinedGoalText = useMemo(
+    () =>
+      [shortTitle, specifics, quantityAnswer, whyHelpful, achievementDifficulty]
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join(' '),
+    [shortTitle, specifics, quantityAnswer, whyHelpful, achievementDifficulty],
+  );
+
+  useEffect(() => {
+    setGoalType(recommendedGoalTypeFromText(combinedGoalText));
+  }, [combinedGoalText]);
 
   const titleWordCount = useMemo(() => wordCount(shortTitle), [shortTitle]);
   const titleOk = titleWordCount > 0 && titleWordCount <= 5;
