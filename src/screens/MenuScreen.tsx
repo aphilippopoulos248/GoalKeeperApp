@@ -19,6 +19,7 @@ import { DailyQuestProgressCard } from '../components/DailyQuestProgressCard';
 import { QuestRow } from '../components/QuestRow';
 import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
+import { useAuthUser } from '../context/AuthUserContext';
 import {
   DailyQuestEntry,
   useQuestProgress,
@@ -35,6 +36,7 @@ import {
 type DailyQuestSortMode = 'recommended' | 'goal' | 'priority';
 
 const DEBUG_NARRATIVE_ALERT_MAX = 4000;
+const ADMIN_PANEL_EMAIL = 'admin@example.com';
 
 function truncateForDebugAlert(s: string, max = DEBUG_NARRATIVE_ALERT_MAX): string {
   if (s.length <= max) return s;
@@ -62,6 +64,8 @@ function prioritySortRank(p: GoalPriority): number {
 
 export function MenuScreen() {
   const { colors } = useAppTheme();
+  const { userEmail } = useAuthUser();
+  const showAdminPanel = userEmail === ADMIN_PANEL_EMAIL;
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
   const route = useRoute<RouteProp<RootTabParamList, 'Menu'>>();
   const listRef = useRef<FlatList<DailyQuestEntry>>(null);
@@ -300,9 +304,11 @@ export function MenuScreen() {
   }, [activeGoals.length, advanceSimulationDay]);
 
   const listFooter = useMemo(
-    () => (
-      <View style={styles.debugFooter}>
-        <Pressable
+    () =>
+      showAdminPanel ? (
+        <View style={styles.debugFooter}>
+          <Text style={[styles.adminPanelTitle, { color: colors.text }]}>Admin Panel</Text>
+          <Pressable
           accessibilityLabel="Debug: regenerate all daily quests"
           disabled={activeGoals.length === 0 || debugRefreshingQuests}
           onPress={onDebugRefreshQuests}
@@ -428,9 +434,10 @@ export function MenuScreen() {
           Simulated day counter (debug, in memory only—resets when you sign out or clear AI
           memory). Refreshes all daily quests; resets checkmarks.
         </Text>
-      </View>
-    ),
+        </View>
+      ) : null,
     [
+      showAdminPanel,
       activeGoals.length,
       colors.border,
       colors.surfaceElevated,
@@ -641,6 +648,11 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.xl,
     paddingHorizontal: spacing.xs,
+  },
+  adminPanelTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: spacing.md,
   },
   debugButton: {
     flexDirection: 'row',

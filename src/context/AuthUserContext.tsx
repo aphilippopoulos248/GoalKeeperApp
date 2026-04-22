@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 
 export type AuthUserContextValue = {
   userId: string | null;
+  userEmail: string | null;
   /** False until the first `getSession` completes. */
   authReady: boolean;
 };
@@ -12,6 +13,7 @@ const AuthUserContext = createContext<AuthUserContextValue | null>(null);
 
 export function AuthUserProvider({ children }: { children: React.ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
@@ -19,6 +21,7 @@ export function AuthUserProvider({ children }: { children: React.ReactNode }) {
     void supabase.auth.getSession().then(({ data: { session } }) => {
       if (cancelled) return;
       setUserId(session?.user.id ?? null);
+      setUserEmail(session?.user.email?.trim().toLowerCase() ?? null);
       setAuthReady(true);
     });
 
@@ -26,6 +29,7 @@ export function AuthUserProvider({ children }: { children: React.ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUserId(session?.user.id ?? null);
+      setUserEmail(session?.user.email?.trim().toLowerCase() ?? null);
     });
 
     return () => {
@@ -37,9 +41,10 @@ export function AuthUserProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(
     () => ({
       userId,
+      userEmail,
       authReady,
     }),
-    [userId, authReady],
+    [userId, userEmail, authReady],
   );
 
   return <AuthUserContext.Provider value={value}>{children}</AuthUserContext.Provider>;
