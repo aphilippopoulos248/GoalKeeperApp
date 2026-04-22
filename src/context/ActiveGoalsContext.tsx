@@ -48,7 +48,7 @@ export type AddGoalOptions = {
 
 type ActiveGoalsContextValue = {
   goals: Goal[];
-  /** True after the first load from Supabase (or seed bootstrap for a new account). */
+  /** True after the first load from Supabase (or signed-out demo state is ready). */
   goalsStorageReady: boolean;
   addGoal: (input: NewGoalInput, options?: AddGoalOptions) => void;
   getGoalById: (id: string) => Goal | undefined;
@@ -89,7 +89,7 @@ function mergeDailyQuestSchedule(
   });
 }
 
-/** Used for AI calls when the goal has no stored deadline (e.g. seed data). */
+/** Used for AI calls when the goal has no stored deadline. */
 function effectiveTargetDateIso(goal: Pick<Goal, 'targetDateIso'>): string {
   if (goal.targetDateIso?.trim()) return goal.targetDateIso;
   const d = new Date();
@@ -177,7 +177,7 @@ function buildGoalFromInput(input: NewGoalInput, options?: AddGoalOptions): Goal
 
 export function ActiveGoalsProvider({ children }: { children: React.ReactNode }) {
   const { userId, authReady } = useAuthUser();
-  const [goals, setGoals] = useState<Goal[]>(() => [...SEED_ACTIVE_GOALS]);
+  const [goals, setGoals] = useState<Goal[]>(() => []);
   const [storageReady, setStorageReady] = useState(false);
   const [lifeScheduleSlots, setLifeScheduleSlots] = useState<ReservedScheduleSlot[]>([]);
   const lifeSlotsHydrated = useRef(false);
@@ -214,12 +214,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
         fetchLifeScheduleSlots(userId),
       ]);
       if (cancelled) return;
-      let nextGoals = loadedGoals;
-      if (nextGoals.length === 0) {
-        nextGoals = [...SEED_ACTIVE_GOALS];
-        await syncGoalsForUser(userId, nextGoals);
-      }
-      setGoals(nextGoals);
+      setGoals(loadedGoals);
       setLifeScheduleSlots(slots);
       lifeScheduleSlotsRef.current = slots;
       lifeSlotsHydrated.current = true;

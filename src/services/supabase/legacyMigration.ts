@@ -24,7 +24,7 @@ import {
 import { fetchGoalsForUser, syncGoalsForUser } from './goalsRepository';
 import { remapLegacyWeeklyCompletionKeys } from './questProgressRepository';
 import { replaceLifeScheduleSlots } from './lifeScheduleRepository';
-import { fetchOrSeedWeeklyQuests } from './weeklyQuestsRepository';
+import { ensureWeeklyQuestRowsInDb } from './weeklyQuestsRepository';
 import type { ReservedScheduleSlot } from '../openaiGoalPlanner';
 import type { Goal } from '../../types';
 
@@ -95,7 +95,7 @@ export async function migrateLegacyLocalData(userId: string): Promise<void> {
     }
 
     if (!(await remoteCompletionsNonEmpty(userId))) {
-      await fetchOrSeedWeeklyQuests(userId);
+      await ensureWeeklyQuestRowsInDb(userId);
       const raw = await getItemScopedWithLegacyMigrate(LEGACY_QUEST_COMPLETED_KEY, userId);
       if (raw) {
         const parsed = JSON.parse(raw) as Record<string, unknown>;

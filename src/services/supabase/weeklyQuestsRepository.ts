@@ -5,25 +5,18 @@ import type { Quest } from '../../types';
 import { ensurePublicProfileRow } from './ensurePublicProfile';
 import { mapQuestRowToQuest, weeklyQuestId } from './questProgressRepository';
 
+function localWeeklyQuests(userId: string): Quest[] {
+  return mockWeeklyQuests.map((q, i) => ({ ...q, id: weeklyQuestId(userId, i + 1) }));
+}
+
+/**
+ * Loads weekly quests from Supabase when present; otherwise returns in-app templates only
+ * (no DB rows). New accounts therefore get no persisted weekly quests until you add UX to create them.
+ */
 export async function fetchOrSeedWeeklyQuests(userId: string): Promise<Quest[]> {
   const profileOk = await ensurePublicProfileRow(userId);
-  // #region agent log
-  fetch('http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '314115' },
-    body: JSON.stringify({
-      sessionId: '314115',
-      runId: 'fk-debug',
-      hypothesisId: 'H2',
-      location: 'weeklyQuestsRepository.ts:beforeQuestsIO',
-      message: 'after ensurePublicProfile',
-      data: { profileOk },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   if (!profileOk) {
-    return mockWeeklyQuests.map((q, i) => ({ ...q, id: weeklyQuestId(userId, i + 1) }));
+    return localWeeklyQuests(userId);
   }
 
   const { data, error } = await supabase
@@ -35,7 +28,7 @@ export async function fetchOrSeedWeeklyQuests(userId: string): Promise<Quest[]> 
 
   if (error) {
     console.error('[weeklyQuestsRepository] fetch', error.message);
-    return mockWeeklyQuests.map((q, i) => ({ ...q, id: weeklyQuestId(userId, i + 1) }));
+    return localWeeklyQuests(userId);
   }
 
   if (data && data.length >= mockWeeklyQuests.length) {
@@ -55,6 +48,17 @@ export async function fetchOrSeedWeeklyQuests(userId: string): Promise<Quest[]> 
     );
   }
 
+  return localWeeklyQuests(userId);
+}
+
+/**
+ * Inserts weekly template quests into DB so legacy `quest_completions` migration can satisfy FKs.
+ * Not used for normal sign-in / empty accounts.
+ */
+export async function ensureWeeklyQuestRowsInDb(userId: string): Promise<void> {
+  const profileOk = await ensurePublicProfileRow(userId);
+  if (!profileOk) return;
+
   const rows = mockWeeklyQuests.map((t, i) => ({
     id: weeklyQuestId(userId, i + 1),
     user_id: userId,
@@ -69,18 +73,5 @@ export async function fetchOrSeedWeeklyQuests(userId: string): Promise<Quest[]> 
   }));
 
   const { error: upErr } = await supabase.from('quests').upsert(rows, { onConflict: 'id' });
-  if (upErr) console.error('[weeklyQuestsRepository] seed', upErr.message);
-
-  return rows.map((r) =>
-    mapQuestRowToQuest({
-      id: r.id,
-      title: r.title,
-      description: r.description,
-      points: r.points,
-      kind: r.kind,
-      day_order: r.day_order,
-      schedule_start_minute: r.schedule_start_minute,
-      schedule_duration_minutes: r.schedule_duration_minutes,
-    }),
-  );
+  if (upErr) console.error('[weeklyQuestsRepository] migration seed weeklies', upErr.message);
 }

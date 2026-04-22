@@ -168,7 +168,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
       }
 
       queueMicrotask(() => {
-        if (userId) void upsertQuestCompletion(userId, id, nextCompleted);
+        if (userId && entry?.goalId) void upsertQuestCompletion(userId, id, nextCompleted);
         applyQuestToggle(quest, nextCompleted);
       });
     },
