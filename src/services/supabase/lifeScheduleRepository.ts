@@ -29,7 +29,8 @@ export async function replaceLifeScheduleSlots(
   userId: string,
   slots: ReservedScheduleSlot[],
 ): Promise<void> {
-  await ensurePublicProfileRow(userId);
+  const profileOk = await ensurePublicProfileRow(userId);
+  if (!profileOk) return;
   const { error: delErr } = await supabase.from('life_schedule_slots').delete().eq('user_id', userId);
   if (delErr) {
     console.error('[lifeScheduleRepository] delete', delErr.message);

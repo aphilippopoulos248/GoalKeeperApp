@@ -77,7 +77,8 @@ export async function migrateLegacyLocalData(userId: string): Promise<void> {
   if (!userId) return;
 
   try {
-    await ensurePublicProfileRow(userId);
+    const profileOk = await ensurePublicProfileRow(userId);
+    if (!profileOk) return;
     const hasRemoteGoals = await remoteGoalsNonEmpty(userId);
     const rawGoals = await getItemScopedWithLegacyMigrate(LEGACY_GOALS_KEY, userId);
     if (rawGoals && !hasRemoteGoals) {

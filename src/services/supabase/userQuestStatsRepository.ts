@@ -23,7 +23,8 @@ export type UserQuestStatsState = {
 };
 
 async function ensureStatsRow(userId: string): Promise<void> {
-  await ensurePublicProfileRow(userId);
+  const profileOk = await ensurePublicProfileRow(userId);
+  if (!profileOk) return;
   const { data } = await supabase
     .from('user_quest_stats')
     .select('user_id')

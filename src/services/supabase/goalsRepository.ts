@@ -230,7 +230,8 @@ async function upsertGoalTree(userId: string, g: Goal): Promise<void> {
 
 /** Full sync: deletes goals removed locally, upserts each goal subtree. */
 export async function syncGoalsForUser(userId: string, goals: Goal[]): Promise<void> {
-  await ensurePublicProfileRow(userId);
+  const profileOk = await ensurePublicProfileRow(userId);
+  if (!profileOk) return;
   const { data: existingRows, error: exErr } = await supabase
     .from('goals')
     .select('id')

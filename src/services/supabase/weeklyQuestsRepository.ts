@@ -6,7 +6,26 @@ import { ensurePublicProfileRow } from './ensurePublicProfile';
 import { mapQuestRowToQuest, weeklyQuestId } from './questProgressRepository';
 
 export async function fetchOrSeedWeeklyQuests(userId: string): Promise<Quest[]> {
-  await ensurePublicProfileRow(userId);
+  const profileOk = await ensurePublicProfileRow(userId);
+  // #region agent log
+  fetch('http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '314115' },
+    body: JSON.stringify({
+      sessionId: '314115',
+      runId: 'fk-debug',
+      hypothesisId: 'H2',
+      location: 'weeklyQuestsRepository.ts:beforeQuestsIO',
+      message: 'after ensurePublicProfile',
+      data: { profileOk },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+  if (!profileOk) {
+    return mockWeeklyQuests.map((q, i) => ({ ...q, id: weeklyQuestId(userId, i + 1) }));
+  }
+
   const { data, error } = await supabase
     .from('quests')
     .select('*')
