@@ -4,7 +4,7 @@ import DateTimePicker, {
 } from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -57,6 +57,25 @@ function startOfTomorrow(): Date {
   d.setDate(d.getDate() + 1);
   d.setHours(12, 0, 0, 0);
   return d;
+}
+
+function startOfDay(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function calendarDaysFromTodayTo(targetDate: Date): number {
+  const start = startOfDay(new Date());
+  const end = startOfDay(targetDate);
+  const diffMs = end.getTime() - start.getTime();
+  return Math.max(0, Math.round(diffMs / (24 * 60 * 60 * 1000)));
+}
+
+function milestoneFrequencyForHorizonDays(days: number): MilestoneFrequency {
+  if (days <= 60) return 'weekly';
+  if (days <= 365) return 'biweekly';
+  return 'monthly';
 }
 
 const DEFAULT_MEASUREMENT_QUESTION =
@@ -112,6 +131,12 @@ export function AddGoalScreen({ navigation }: Props) {
     null,
   );
   const [pendingDatePart, setPendingDatePart] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setMilestoneFrequency(
+      milestoneFrequencyForHorizonDays(calendarDaysFromTodayTo(targetDate)),
+    );
+  }, [targetDate]);
 
   const titleWordCount = useMemo(() => wordCount(shortTitle), [shortTitle]);
   const titleOk = titleWordCount > 0 && titleWordCount <= 5;
