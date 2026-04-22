@@ -105,3 +105,18 @@ export async function hasProgressJournalOnDate(
   }
   return (data?.length ?? 0) > 0;
 }
+
+/** Removes all progress journal entries for the user (clears what the quest AI reads from the journal). */
+export async function deleteAllProgressJournalEntriesForUser(
+  userId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { error } = await supabase
+    .from('progress_journal_entries')
+    .delete()
+    .eq('user_id', userId);
+  if (error) {
+    console.error('[deleteAllProgressJournalEntriesForUser]', error);
+    return { ok: false, error: error.message || 'Could not clear journal.' };
+  }
+  return { ok: true };
+}

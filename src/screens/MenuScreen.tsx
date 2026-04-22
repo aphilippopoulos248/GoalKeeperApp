@@ -58,11 +58,13 @@ export function MenuScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
   const route = useRoute<RouteProp<RootTabParamList, 'Menu'>>();
   const listRef = useRef<FlatList<DailyQuestEntry>>(null);
-  const { goals, refreshAllDailyQuestsForDebug, submitProgressJournal } = useActiveGoals();
+  const { goals, refreshAllDailyQuestsForDebug, submitProgressJournal, clearAiProgressMemory } =
+    useActiveGoals();
   const [sortMode, setSortMode] = useState<DailyQuestSortMode>('recommended');
   const [debugRefreshingQuests, setDebugRefreshingQuests] = useState(false);
   const [debugJournalText, setDebugJournalText] = useState('');
   const [debugJournalSaving, setDebugJournalSaving] = useState(false);
+  const [debugClearingAiMemory, setDebugClearingAiMemory] = useState(false);
   const {
     completed,
     toggleQuest,
@@ -220,6 +222,37 @@ export function MenuScreen() {
     })();
   }, [debugJournalText, submitProgressJournal]);
 
+  const onDebugClearAiMemory = useCallback(() => {
+    Alert.alert(
+      'Clear AI progress memory',
+      'This deletes all saved progress journal entries. The quest AI will not see your past notes until you add new ones.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setDebugClearingAiMemory(true);
+              try {
+                const res = await clearAiProgressMemory();
+                if (!res.ok) {
+                  Alert.alert('Clear AI memory', res.error ?? 'Request failed.', [{ text: 'OK' }]);
+                  return;
+                }
+                Alert.alert('Clear AI memory', 'Journal cleared. The AI has no stored progress context.', [
+                  { text: 'OK' },
+                ]);
+              } finally {
+                setDebugClearingAiMemory(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [clearAiProgressMemory]);
+
   const listFooter = useMemo(
     () => (
       <View style={styles.debugFooter}>
@@ -294,6 +327,27 @@ export function MenuScreen() {
             Save for next quest refresh
           </Text>
         </Pressable>
+        <Pressable
+          accessibilityLabel="Debug: clear AI progress memory"
+          disabled={debugClearingAiMemory}
+          onPress={onDebugClearAiMemory}
+          style={({ pressed }) => [
+            styles.debugButton,
+            {
+              backgroundColor: colors.surfaceElevated,
+              borderColor: colors.border,
+              marginTop: spacing.sm,
+              opacity: debugClearingAiMemory ? 0.5 : pressed ? 0.88 : 1,
+            },
+          ]}
+        >
+          {debugClearingAiMemory ? (
+            <ActivityIndicator color={colors.textSecondary} size="small" />
+          ) : null}
+          <Text style={[styles.debugButtonText, { color: colors.textSecondary }]}>
+            Debug: clear AI progress memory
+          </Text>
+        </Pressable>
         <Text style={[styles.debugHint, { color: colors.textSecondary }]}>
           Saves to your journal and regenerates dailies in place (keeps checkmarks) when you have
           a full set per goal.
@@ -306,9 +360,11 @@ export function MenuScreen() {
       colors.surfaceElevated,
       colors.text,
       colors.textSecondary,
+      debugClearingAiMemory,
       debugJournalSaving,
       debugJournalText,
       debugRefreshingQuests,
+      onDebugClearAiMemory,
       onDebugRefreshQuests,
       onDebugSaveJournal,
     ],

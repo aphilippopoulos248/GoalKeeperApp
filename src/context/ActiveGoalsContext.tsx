@@ -12,6 +12,7 @@ import { SEED_ACTIVE_GOALS } from '../data/mockGoal';
 import { fetchGoalsForUser, syncGoalsForUser } from '../services/supabase/goalsRepository';
 import { fetchLifeScheduleSlots, replaceLifeScheduleSlots } from '../services/supabase/lifeScheduleRepository';
 import {
+  deleteAllProgressJournalEntriesForUser,
   fetchRecentProgressJournal,
   formatJournalRowsForAi,
   insertProgressJournalEntry,
@@ -81,6 +82,8 @@ type ActiveGoalsContextValue = {
     body: string,
     source: JournalEntrySource,
   ) => Promise<{ ok: boolean; error?: string }>;
+  /** Delete stored progress journal entries and clear in-memory AI context (debug). Requires sign-in. */
+  clearAiProgressMemory: () => Promise<{ ok: boolean; error?: string }>;
 };
 
 const ActiveGoalsContext = createContext<ActiveGoalsContextValue | null>(null);
@@ -628,6 +631,18 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     [userId, refreshDailyQuestsWithJournalContext],
   );
 
+  const clearAiProgressMemory = useCallback(async () => {
+    if (userId === null) {
+      return { ok: false as const, error: 'Sign in to clear the AI progress journal.' };
+    }
+    const res = await deleteAllProgressJournalEntriesForUser(userId);
+    if (!res.ok) {
+      return { ok: false as const, error: res.error };
+    }
+    journalContextForAiRef.current = '';
+    return { ok: true as const };
+  }, [userId]);
+
   const toggleCheckpoint = useCallback((goalId: string, checkpointId: string) => {
     setGoals((prev) => {
       const oldGoal = prev.find((g) => g.id === goalId);
@@ -671,6 +686,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       clearLifeScheduleConstraints,
       refreshAllDailyQuestsForDebug,
       submitProgressJournal,
+      clearAiProgressMemory,
     }),
     [
       goals,
@@ -685,6 +701,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       clearLifeScheduleConstraints,
       refreshAllDailyQuestsForDebug,
       submitProgressJournal,
+      clearAiProgressMemory,
     ],
   );
 
