@@ -267,6 +267,10 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
             todayIso: today.toISOString(),
             completedCheckpointCount,
             checkpointTitles: snapshot.checkpoints.map((c) => c.title),
+            upcomingCheckpointTitles: snapshot.checkpoints
+              .filter((c) => !c.done)
+              .map((c) => c.title),
+            totalCheckpointCount: snapshot.checkpoints.length,
             dailyQuestCount: questCount,
             milestoneFrequency: parseMilestoneFrequency(snapshot.milestoneFrequency),
             reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
@@ -440,6 +444,10 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
           todayIso,
           completedCheckpointCount: goal.checkpoints.filter((c) => c.done).length,
           checkpointTitles: goal.checkpoints.map((c) => c.title),
+          upcomingCheckpointTitles: goal.checkpoints
+            .filter((c) => !c.done)
+            .map((c) => c.title),
+          totalCheckpointCount: goal.checkpoints.length,
           dailyQuestCount: questCount,
           milestoneFrequency: parseMilestoneFrequency(goal.milestoneFrequency),
           reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(

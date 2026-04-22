@@ -52,6 +52,10 @@ export type GoalPlannerBaseParams = {
 
 export type RegenerateDailyQuestsParams = GoalPlannerBaseParams & {
   checkpointTitles: string[];
+  /** Checkpoints not yet done—steers dailies toward the next part of the path. */
+  upcomingCheckpointTitles: string[];
+  /** Total checkpoints for this goal (early vs late journey). */
+  totalCheckpointCount: number;
   /**
    * When set, the model must not repeat these titles/actions (e.g. after a user refresh).
    * Omit or use [] for first-time backfill.
@@ -355,17 +359,24 @@ const DAILY_QUEST_COPY_AND_TIER_RULES = `Daily quest text (critical):
   - "title": at most **5 words**; short imperative (e.g. "Choose one book", "Run five kilometers"). No period at the end.
   - "description": 1–3 sentences that **add** information the title does not cover: time window, how much (count, pages, minutes, reps, distance), where, or what "done" looks like. **Do not** copy the title, paste the same sentence, or use a near-paraphrase of the title. The description is the detail; the title is the hook.
 - **Zero baseline (completedCheckpointCount is 0):** Assume the user has **not** already built the habit and may lack prior skill. No prerequisite skills—quests must be things a total beginner can do today. **Order** the dailyQuests array as a small ramp: first item = **shortest / easiest setup** (2–5 min, e.g. pick the book, find a 10-minute video, lay out shoes); later items in the list = **slightly** more (still easy: e.g. read 5 pages, then 10 pages; mirror talk for 1 minute). Forbid vague stems ("improve…", "work on…", "get better at…") unless the same line names a **concrete** action, object, and/or number.
-- **Milestone difficulty ladder (use completedCheckpointCount):**
-  - 0: micro/foundation, minimal friction, obvious first steps only.
-  - 1: light, repeatable practice—still not "milestone level."
-  - 2+: noticeably harder day-sized actions (time, volume, or intensity) than at 0—still **safer and smaller** than a full checkpoint/milestone; never replace a milestone.
+- **Milestone / progress scale:** follow the **Outcome proximity** block below (not "just harder"—closer to the goal over time).
 - **Examples (flavor only; match the user's goal):** "Read more" with 0 milestones: choose a book → read 5 pages → read 10 pages. "Socialize more" with 0: watch one specific short video on conversation skills → practice talking aloud in a mirror for 1 minute. "Get fit" with 2+ milestones: 20 push-ups in one set, run 5 km outside, etc.`;
+
+const DAILY_QUEST_PROXIMITY_RULES = `Outcome proximity (critical—use completedCheckpointCount, goal "title"/"description", and when present "upcomingCheckpointTitles" / "totalCheckpointCount"):
+- Two axes: (1) day-sized / finishable today; (2) **closeness to the user’s stated outcome** (goal title + description = north star). When completedCheckpointCount increases, raise **(2)** every tier—not only minutes, reps, or difficulty. Avoid endless repeats of the same *kind* of prep (videos, mirror work, generic group-only events) at high counts unless the goal is purely quantitative (e.g. reading pages).
+- Tier guide (adapt to the goal; not a rigid script):
+  - **0 milestones completed:** farthest from the outcome—skills, research, environment, private rehearsal, self-contained prep.
+  - **1 milestone completed:** real-world **low-stakes** exposure in the **domain** of the goal.
+  - **2+ milestones completed:** **outcome-adjacent** actions—what a reasonable person reads as *directly practicing the goal* (still one-day sized, still smaller than a full milestone). For relationship, dating, or romance-aligned goals when the title implies it: progress from generic socializing toward **interest-based** interaction (e.g. genuine compliment, brief one-on-one chat, express interest, low-pressure invite)—not perpetual prep. For reading, fitness, etc., move toward the measurable core of that goal.
+- **Milestones:** dailies stay easier than checkpoints, but at higher completedCheckpointCount they may be **mini-versions in spirit** of the **next** upcoming milestones—same path, smaller step; never copy a milestone label verbatim.
+- **Respect and safety (brief):** consent, mutual interest, appropriate public or social contexts, no pressure, no harassment; respect boundaries and "no."`;
 
 const REGEN_ANTI_REPETITION_RULES = `Replace mode (applies when user JSON has "replacePreviousQuests": true and a non-empty "previousDailyQuests" array):
 - That array lists the **old** daily quests being **fully replaced**. You must output a **new** set of quests, not a light revision.
 - New titles and descriptions must be **substantively different** from every previous title and every previous description: use **different** core verbs, nouns, objects, and *kinds* of action (e.g. if the old set was all "read N pages", switch to a mix: select material, time-boxed session, note one takeaway, audio, new location, etc.—whatever fits the goal but **not** the same three beats).
 - **Forbidden:** reusing a previous title; minor word swaps ("5" vs "five"); the same main action with a different number; the same three-step story with tweaked wording; overlapping first three words of any previous title.
 - **Required:** at least one quest should feel like a **different angle** on the goal (preparation, reflection, environment, social, measurement, or recovery—not only "more of the same primary behavior").
+- **Do not** reset to early-journey prep-only quests: match the current **completedCheckpointCount** outcome proximity and **upcomingCheckpointTitles** so variety does not undo the proximity ladder.
 - If "replacePreviousQuests" is false or "previousDailyQuests" is empty, ignore this block.
 - "regenerationRequestId" in the user JSON is unique per request; each id must produce an independent new batch, not a small edit of the last output.`;
 
@@ -387,14 +398,16 @@ Fields:
 
 Milestones vs daily quests (critical):
 - Milestones (checkpoint labels) are **major sub-goals**—noticeably **harder and braver** than any single daily quest. They should feel like **real progress** and often push the user **outside their comfort zone** in a way that fits the goal (e.g. for “improve social skills”: daily quests might be “practice a short conversation” or “watch a video on body language”, while a milestone might be “attend a public meetup or social event alone”). Milestones are **not** small home exercises; they are **challenge moments** the user would not do every day.
-- Daily quests are **smaller, repeatable, preparatory steps** (practice, reflection, learning, low-stakes rehearsals) that **build toward** those milestones. They must **not** copy the same wording as a milestone; they prepare the user for the bigger step later.
+- Daily quests are **smaller** than milestones and **build toward** them. At **low** completedCheckpointCount they are mostly **preparatory** (practice, reflection, learning, low-stakes rehearsal). At **higher** completedCheckpointCount they should also move **closer to the named goal outcome** (see Outcome proximity below)—not stay forever in generic prep. They must **not** copy the same wording as a milestone.
 - Each milestone label must be a **single clear, verifiable challenge** for that period; avoid vague labels like “keep going”.
 
 ${DAILY_QUEST_COPY_AND_TIER_RULES}
 
+${DAILY_QUEST_PROXIMITY_RULES}
+
 Rules:
 - Use the user's title and description; make SMART fields concrete.
-- If completedCheckpointCount is 0, daily quests must be VERY EASY (5–15 min, low friction), following the zero-baseline and ramp rules above. If higher, increase difficulty and points modestly (still safe and actionable) per the ladder above.
+- If completedCheckpointCount is 0, daily quests must be VERY EASY (5–15 min, low friction), following the zero-baseline and ramp rules above. If higher, increase **proximity to the goal outcome** and difficulty/points modestly (still safe and actionable) per the Outcome proximity block above.
 - Checkpoints must align with the goal, deadline, and milestoneFrequency from the user message.
 - dailyQuests must be specific to this goal’s title and description (not generic self-help).
 - Each dailyQuest "points" MUST be exactly one of 10, 15, 20, or 25 (use different values across quests when possible).
@@ -415,13 +428,15 @@ dailyQuests must have exactly ${n} items: { "title", "description", "points", "d
 
 ${DAILY_QUEST_COPY_AND_TIER_RULES}
 
+${DAILY_QUEST_PROXIMITY_RULES}
+
 ${REGEN_ANTI_REPETITION_RULES}
 
 Rules:
-- The user JSON includes "checkpointTitles": the existing milestone names for this goal. Daily quests must be **smaller preparatory steps** (practice, study, low-stakes drills) that **support** those milestones—**not** duplicate them. Daily quests should feel **easier** than completing a milestone; milestones stay the **bold stretch** challenges. Use "completedCheckpointCount" and "checkpointTitles" to match difficulty and the **next** not-yet-done milestones to the dailies you write.
+- The user JSON includes "checkpointTitles" and (when present) "upcomingCheckpointTitles" and "totalCheckpointCount". Daily quests must be **smaller** than full milestones, **support** the path to upcoming milestones, and **increase closeness to the goal** as completedCheckpointCount rises (see Outcome proximity). They must **not** duplicate a milestone’s wording. Use completedCheckpointCount, upcoming checkpoints, and **not** only generic "prep" at high progress.
 - The user message includes milestoneFrequency (weekly / biweekly / monthly). Align daily quest pacing and tone with that cadence (e.g. smaller daily steps when milestones are weekly vs monthly).
 - Quests must support the user's goal and build skills toward the **next** milestones the user has not yet reached.
-- If completedCheckpointCount is 0, quests are VERY EASY, following the zero-baseline and ramp rules above. Higher counts follow the difficulty ladder above—still **below** the bar of a full milestone challenge.
+- If completedCheckpointCount is 0, quests are VERY EASY, following the zero-baseline and ramp rules above. Higher counts follow **Outcome proximity**—still **below** the bar of a full milestone challenge.
 - Each quest must be specific to this goal’s title and description (not generic advice).
 - Each quest MUST include dayOrder 0–999; the Menu sorts all goals’ quests ascending (morning first, evening last).
 - Each quest MUST include startMinute and durationMinutes (non-overlapping within the batch; align start times with dayOrder).
@@ -1016,6 +1031,8 @@ export async function regenerateDailyQuests(
     todayIso: params.todayIso,
     completedCheckpointCount: params.completedCheckpointCount,
     checkpointTitles: params.checkpointTitles,
+    upcomingCheckpointTitles: params.upcomingCheckpointTitles,
+    totalCheckpointCount: params.totalCheckpointCount,
     dailyQuestCount,
     milestoneFrequency,
     reservedScheduleSlots: params.reservedScheduleSlots ?? [],
