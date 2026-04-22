@@ -36,6 +36,8 @@ import {
 type DailyQuestSortMode = 'recommended' | 'goal' | 'priority';
 
 const DEBUG_NARRATIVE_ALERT_MAX = 4000;
+/** Per-section cap so combined alert text stays readable on device alerts. */
+const DEBUG_JOURNAL_SECTION_MAX = 2200;
 const ADMIN_PANEL_EMAIL = 'admin@example.com';
 
 function truncateForDebugAlert(s: string, max = DEBUG_NARRATIVE_ALERT_MAX): string {
@@ -75,11 +77,13 @@ export function MenuScreen() {
     submitProgressJournal,
     clearAiProgressMemory,
     advanceSimulationDay,
+    fetchJournalDebugSnapshot,
   } = useActiveGoals();
   const [sortMode, setSortMode] = useState<DailyQuestSortMode>('recommended');
   const [debugRefreshingQuests, setDebugRefreshingQuests] = useState(false);
   const [debugJournalText, setDebugJournalText] = useState('');
   const [debugJournalSaving, setDebugJournalSaving] = useState(false);
+  const [debugJournalViewLoading, setDebugJournalViewLoading] = useState(false);
   const [debugClearingAiMemory, setDebugClearingAiMemory] = useState(false);
   const [debugAdvancingDay, setDebugAdvancingDay] = useState(false);
   const {
@@ -241,6 +245,38 @@ export function MenuScreen() {
     })();
   }, [debugJournalText, submitProgressJournal]);
 
+  const onDebugViewJournal = useCallback(() => {
+    void (async () => {
+      setDebugJournalViewLoading(true);
+      try {
+        const snap = await fetchJournalDebugSnapshot();
+        if (!snap.ok) {
+          Alert.alert('Debug journal', snap.error, [{ text: 'OK' }]);
+          return;
+        }
+        const plannerBlock = snap.plannerContext
+          ? truncateForDebugAlert(snap.plannerContext, DEBUG_JOURNAL_SECTION_MAX)
+          : '(empty)';
+        const rawBlock = truncateForDebugAlert(snap.rawJournalLines, DEBUG_JOURNAL_SECTION_MAX);
+        Alert.alert(
+          'Debug journal',
+          [
+            `Simulated day: ${snap.simulationDay}`,
+            '',
+            '--- AI planner context (in-memory) ---',
+            plannerBlock,
+            '',
+            `--- Raw journal entries (${snap.entryCount}) ---`,
+            rawBlock,
+          ].join('\n'),
+          [{ text: 'OK' }],
+        );
+      } finally {
+        setDebugJournalViewLoading(false);
+      }
+    })();
+  }, [fetchJournalDebugSnapshot]);
+
   const onDebugClearAiMemory = useCallback(() => {
     Alert.alert(
       'Clear AI progress memory',
@@ -340,6 +376,29 @@ export function MenuScreen() {
           style={[styles.debugSectionLabel, { color: colors.text }]}
         >
           Share progress with AI (debug)
+        </Text>
+        <Pressable
+          accessibilityLabel="Debug: view current user journal"
+          disabled={debugJournalViewLoading}
+          onPress={onDebugViewJournal}
+          style={({ pressed }) => [
+            styles.debugButton,
+            {
+              backgroundColor: colors.surfaceElevated,
+              borderColor: colors.border,
+              opacity: debugJournalViewLoading ? 0.5 : pressed ? 0.88 : 1,
+            },
+          ]}
+        >
+          {debugJournalViewLoading ? (
+            <ActivityIndicator color={colors.textSecondary} size="small" />
+          ) : null}
+          <Text style={[styles.debugButtonText, { color: colors.textSecondary }]}>
+            Debug: view current journal
+          </Text>
+        </Pressable>
+        <Text style={[styles.debugHint, { color: colors.textSecondary }]}>
+          Shows simulated day, in-memory AI context, and raw saved journal rows.
         </Text>
         <TextInput
           value={debugJournalText}
@@ -447,11 +506,13 @@ export function MenuScreen() {
       debugClearingAiMemory,
       debugJournalSaving,
       debugJournalText,
+      debugJournalViewLoading,
       debugRefreshingQuests,
       onDebugAdvanceSimulatedDay,
       onDebugClearAiMemory,
       onDebugRefreshQuests,
       onDebugSaveJournal,
+      onDebugViewJournal,
     ],
   );
 

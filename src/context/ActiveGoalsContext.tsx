@@ -102,6 +102,20 @@ type ActiveGoalsContextValue = {
    * Requires sign-in and at least one active goal with storage ready.
    */
   advanceSimulationDay: () => Promise<{ ok: true } | { ok: false; error: string }>;
+  /**
+   * Debug: load planner journal context (in-memory), raw recent DB entries, and simulated day.
+   * Requires sign-in.
+   */
+  fetchJournalDebugSnapshot: () => Promise<
+    | {
+        ok: true;
+        plannerContext: string;
+        rawJournalLines: string;
+        entryCount: number;
+        simulationDay: number;
+      }
+    | { ok: false; error: string }
+  >;
 };
 
 const ActiveGoalsContext = createContext<ActiveGoalsContextValue | null>(null);
@@ -830,6 +844,31 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     return { ok: true };
   }, [userId, storageReady, refreshAllDailyQuestsForDebug]);
 
+  const fetchJournalDebugSnapshot = useCallback(async () => {
+    if (userId === null) {
+      return { ok: false as const, error: 'Sign in to view journal debug info.' };
+    }
+    const plannerContext = journalContextForAiRef.current.trim();
+    const rows = await fetchRecentProgressJournal(userId);
+    const rawJournalLines =
+      rows.length === 0
+        ? '(no saved journal rows in the last 14 days)'
+        : [...rows]
+            .sort(
+              (a, b) =>
+                new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+            )
+            .map((r) => `[${r.entry_date} ${r.source}] ${r.body}`)
+            .join('\n\n');
+    return {
+      ok: true as const,
+      plannerContext,
+      rawJournalLines,
+      entryCount: rows.length,
+      simulationDay: simulationDayForTestRef.current,
+    };
+  }, [userId]);
+
   const revealCheckpoint = useCallback(
     async (goalId: string, checkpointId: string) => {
       if (userId === null) {
@@ -950,6 +989,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       submitProgressJournal,
       clearAiProgressMemory,
       advanceSimulationDay,
+      fetchJournalDebugSnapshot,
     }),
     [
       goals,
@@ -967,6 +1007,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       submitProgressJournal,
       clearAiProgressMemory,
       advanceSimulationDay,
+      fetchJournalDebugSnapshot,
     ],
   );
 
