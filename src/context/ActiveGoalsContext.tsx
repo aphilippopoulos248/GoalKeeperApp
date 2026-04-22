@@ -44,6 +44,8 @@ import {
 } from '../utils/dailyQuestSchedule';
 import { dailyQuestCountForPriority, parseGoalPriority } from '../utils/goalPriority';
 
+import { clearAttachedRecipesForGoal } from '../lib/questAttachedRecipeStorage';
+
 import { useAuthUser } from './AuthUserContext';
 
 export type NewGoalInput = {
@@ -417,6 +419,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
               .map((q) => ({ title: q.title, description: q.description })),
             userProgressJournal: journalContextForAiRef.current.trim() || undefined,
           });
+          if (userId) void clearAttachedRecipesForGoal(userId, snapshot.id);
           const regenBatch = Date.now();
           setGoals((cur) =>
             cur.map((goal) => {
@@ -447,7 +450,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
         }
       })();
     }
-  }, [goals, storageReady, lifeScheduleSlots]);
+  }, [goals, storageReady, lifeScheduleSlots, userId]);
 
   const reflowDailyQuestsWithLifeSlots = useCallback(
     async (lifeSlots: ReservedScheduleSlot[]) => {
@@ -607,6 +610,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
           scheduleStartMinute: q.startMinute,
           scheduleDurationMinutes: q.durationMinutes,
         }));
+        if (userId) void clearAttachedRecipesForGoal(userId, goal.id);
         working = working.map((g) =>
           g.id === goal.id ? { ...g, dailyQuests: newDailies } : g,
         );
@@ -621,7 +625,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     if (errors.length > 0) {
       throw new Error(errors.join('\n'));
     }
-  }, [storageReady]);
+  }, [storageReady, userId]);
 
   const refreshDailyQuestsWithJournalContext = useCallback(async () => {
     if (!storageReady) return;
@@ -670,6 +674,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
           sortedDailies,
           dailyQuestsRaw,
         );
+        if (userId) void clearAttachedRecipesForGoal(userId, goal.id);
         working = working.map((g) =>
           g.id === goal.id ? { ...g, dailyQuests: newDailies } : g,
         );
@@ -679,7 +684,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     }
     setGoals(working);
     goalsRef.current = working;
-  }, [storageReady]);
+  }, [storageReady, userId]);
 
   /** Refresh one goal’s dailies in place (stable quest ids), e.g. after a milestone is revealed. */
   const refreshDailyQuestsForGoalId = useCallback(
@@ -730,6 +735,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
           sortedDailies,
           dailyQuestsRaw,
         );
+        if (userId) void clearAttachedRecipesForGoal(userId, goal.id);
         working = working.map((g) =>
           g.id === goal.id ? { ...g, dailyQuests: newDailies } : g,
         );
@@ -739,7 +745,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
         console.error('[refreshDailyQuestsForGoalId]', goal.id, e);
       }
     },
-    [storageReady],
+    [storageReady, userId],
   );
 
   const submitProgressJournal = useCallback(

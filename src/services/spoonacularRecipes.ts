@@ -263,6 +263,90 @@ export type AssistRecipe = {
   sourceUrl?: string;
 };
 
+/** Full recipe for assist UI and AsyncStorage (ingredients + steps). */
+export type AssistFullRecipe = {
+  spoonacularId: number;
+  title: string;
+  ingredientLines: string[];
+  stepLines: string[];
+  image?: string;
+  sourceUrl?: string;
+  servings?: number;
+  readyInMinutes?: number;
+};
+
+function normalizeRecipeImageUrl(image: unknown, recipeId: number): string | undefined {
+  if (typeof image !== 'string' || !image.trim()) return undefined;
+  const s = image.trim();
+  if (s.startsWith('http://') || s.startsWith('https://')) return s;
+  return `https://img.spoonacular.com/recipes/${recipeId}-312x231.jpg`;
+}
+
+/**
+ * GET /recipes/{id}/information — ingredients and analyzed instructions.
+ */
+export async function fetchFullRecipeInformation(recipeId: number): Promise<AssistFullRecipe | null> {
+  const apiKey = getSpoonacularApiKey();
+  if (!apiKey) return null;
+  const sp = new URLSearchParams({
+    includeNutrition: 'false',
+  });
+  const data = (await getJson(`/recipes/${recipeId}/information`, sp, apiKey)) as Record<
+    string,
+    unknown
+  > | null;
+  if (!data || typeof data !== 'object') return null;
+
+  const title = typeof data.title === 'string' ? data.title.trim() : '';
+  if (!title) return null;
+
+  const ingredientLines: string[] = [];
+  const ext = data.extendedIngredients;
+  if (Array.isArray(ext)) {
+    for (const item of ext) {
+      if (!item || typeof item !== 'object') continue;
+      const orig = (item as { original?: string }).original;
+      if (typeof orig === 'string' && orig.trim()) ingredientLines.push(orig.trim());
+    }
+  }
+
+  const stepLines: string[] = [];
+  const analyzed = data.analyzedInstructions;
+  if (Array.isArray(analyzed)) {
+    for (const block of analyzed) {
+      if (!block || typeof block !== 'object') continue;
+      const steps = (block as { steps?: unknown }).steps;
+      if (!Array.isArray(steps)) continue;
+      for (const st of steps) {
+        if (!st || typeof st !== 'object') continue;
+        const stepText = (st as { step?: string }).step;
+        if (typeof stepText === 'string' && stepText.trim()) stepLines.push(stepText.trim());
+      }
+    }
+  }
+
+  const servingsRaw = data.servings;
+  const servings =
+    typeof servingsRaw === 'number' && Number.isFinite(servingsRaw)
+      ? Math.round(servingsRaw)
+      : undefined;
+  const readyRaw = data.readyInMinutes;
+  const readyInMinutes =
+    typeof readyRaw === 'number' && Number.isFinite(readyRaw) ? Math.round(readyRaw) : undefined;
+  const sourceUrl = typeof data.sourceUrl === 'string' ? data.sourceUrl : undefined;
+
+  return {
+    spoonacularId: recipeId,
+    title,
+    ingredientLines,
+    stepLines,
+    image: normalizeRecipeImageUrl(data.image, recipeId),
+    sourceUrl,
+    servings,
+    readyInMinutes,
+  };
+}
+
 function nutrientsToAssistRecipes(items: FindByNutrientsItem[]): AssistRecipe[] {
   return items.map((r) => ({
     id: r.id,

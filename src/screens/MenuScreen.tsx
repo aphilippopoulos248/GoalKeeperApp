@@ -36,6 +36,10 @@ import type { GoalPriority } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 import {
+  loadAllAttachedRecipes,
+  type QuestAttachedRecipeMap,
+} from '../lib/questAttachedRecipeStorage';
+import {
   dailyQuestCountForPriority,
   parseGoalPriority,
 } from '../utils/goalPriority';
@@ -78,7 +82,7 @@ function prioritySortRank(p: GoalPriority): number {
 
 export function MenuScreen() {
   const { colors } = useAppTheme();
-  const { userEmail } = useAuthUser();
+  const { userEmail, userId } = useAuthUser();
   const showAdminPanel = userEmail === ADMIN_PANEL_EMAIL;
   const navigation = useNavigation<MenuScreenNavigation>();
   const route = useRoute<RouteProp<RootTabParamList, 'Menu'>>();
@@ -98,6 +102,17 @@ export function MenuScreen() {
   const [debugJournalViewLoading, setDebugJournalViewLoading] = useState(false);
   const [debugClearingAiMemory, setDebugClearingAiMemory] = useState(false);
   const [debugAdvancingDay, setDebugAdvancingDay] = useState(false);
+  const [attachedByQuest, setAttachedByQuest] = useState<QuestAttachedRecipeMap>({});
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) {
+        setAttachedByQuest({});
+        return;
+      }
+      void loadAllAttachedRecipes(userId).then(setAttachedByQuest);
+    }, [userId]),
+  );
   const {
     completed,
     toggleQuest,
@@ -570,6 +585,7 @@ export function MenuScreen() {
           quest={entry.quest}
           completed={!!completed[entry.quest.id]}
           onToggle={() => toggleQuest(entry.quest.id)}
+          attachedRecipe={attachedByQuest[entry.goalId]?.[entry.quest.id]}
           onAssistPress={() =>
             navigation.navigate('QuestAssist', {
               goalId: entry.goalId,
@@ -579,7 +595,7 @@ export function MenuScreen() {
         />
       </View>
     ),
-    [colors, completed, navigation, toggleQuest],
+    [attachedByQuest, colors, completed, navigation, toggleQuest],
   );
 
   const listHeader = useMemo(

@@ -26,13 +26,21 @@ import {
   type QuestAssistHistoryEntry,
 } from '../services/questAssistOpenai';
 import {
+  fetchFullRecipeInformation,
   fetchRecipeNutritionSummary,
   fetchRecipeSuggestionsForAssist,
   resolveAssistNutritionRecipeId,
   searchRecipeIdByTitle,
+  type AssistFullRecipe,
   type AssistRecipe,
 } from '../services/spoonacularRecipes';
+import {
+  clearAttachedRecipe,
+  getAttachedRecipe,
+  setAttachedRecipe,
+} from '../lib/questAttachedRecipeStorage';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
+import { useAuthUser } from '../context/AuthUserContext';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 
@@ -45,7 +53,13 @@ type ChatRole = 'user' | 'assistant';
 
 type ChatMessage =
   | { id: string; role: ChatRole; text: string }
-  | { id: string; role: 'assistant'; text: string; recipes?: AssistRecipe[] };
+  | {
+      id: string;
+      role: 'assistant';
+      text: string;
+      recipes?: AssistRecipe[];
+      fullRecipe?: AssistFullRecipe;
+    };
 
 function extractRecentRecipesFromMessages(messages: ChatMessage[]): {
   id: number;
@@ -53,10 +67,14 @@ function extractRecentRecipesFromMessages(messages: ChatMessage[]): {
 }[] {
   const out: { id: number; title: string }[] = [];
   for (const m of messages) {
-    if (m.role === 'assistant' && 'recipes' in m && m.recipes?.length) {
+    if (m.role !== 'assistant') continue;
+    if ('recipes' in m && m.recipes?.length) {
       for (const r of m.recipes) {
         out.push({ id: r.id, title: r.title });
       }
+    }
+    if ('fullRecipe' in m && m.fullRecipe) {
+      out.push({ id: m.fullRecipe.spoonacularId, title: m.fullRecipe.title });
     }
   }
   return out;
@@ -71,16 +89,20 @@ function toPlannerHistory(messages: ChatMessage[]): QuestAssistHistoryEntry[] {
       'recipes' in m && m.recipes?.length
         ? m.recipes.map((r) => r.id)
         : undefined;
-    return { role: 'assistant', text: m.text, recipeIds: ids };
+    const fullRecipeSpoonacularId =
+      'fullRecipe' in m && m.fullRecipe ? m.fullRecipe.spoonacularId : undefined;
+    return { role: 'assistant', text: m.text, recipeIds: ids, fullRecipeSpoonacularId };
   });
 }
 
 export function QuestAssistScreen() {
   const { colors } = useAppTheme();
+  const { userId } = useAuthUser();
   const navigation = useNavigation();
   const route = useRoute<RouteProp<MainStackParamList, 'QuestAssist'>>();
   const { goalId, questId } = route.params;
   const { goals } = useActiveGoals();
+  const [savedToQuest, setSavedToQuest] = useState<AssistFullRecipe | null>(null);
 
   const goal = useMemo(
     () => goals.find((g) => g.id === goalId),
@@ -106,6 +128,21 @@ export function QuestAssistScreen() {
       navigation.goBack();
     }
   }, [goal, quest, navigation]);
+
+  useEffect(() => {
+    if (!userId || !goal || !quest) {
+      setSavedToQuest(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const r = await getAttachedRecipe(userId, goal.id, quest.id);
+      if (!cancelled) setSavedToQuest(r);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, goal, quest]);
 
   useEffect(() => {
     Animated.timing(pageFade, {
@@ -190,6 +227,7 @@ export function QuestAssistScreen() {
       });
 
       let recipes: AssistRecipe[] | undefined;
+      let fullRecipe: AssistFullRecipe | undefined;
       let text = plan.reply.trim();
 
       if (plan.intent === 'suggest_recipes') {
@@ -203,6 +241,25 @@ export function QuestAssistScreen() {
         });
         recipes = list ?? undefined;
         if (!text) text = fallbackQuestAssistIntro(!!recipes?.length);
+      } else if (plan.intent === 'full_recipe') {
+        let rid = resolveAssistNutritionRecipeId({
+          explicitId: plan.fullRecipeSpoonacularId,
+          titleHint: plan.fullRecipeTitleHint,
+          recentRecipes,
+          userMessage,
+        });
+        if (rid == null && plan.fullRecipeTitleHint?.trim()) {
+          rid = await searchRecipeIdByTitle(plan.fullRecipeTitleHint.trim());
+        }
+        const full = rid != null ? await fetchFullRecipeInformation(rid) : null;
+        if (full) {
+          fullRecipe = full;
+          if (!text) text = 'Here is the full recipe with ingredients and steps:';
+        } else {
+          text =
+            text ||
+            "I couldn’t load that recipe. Try a dish name from the list above or be more specific.";
+        }
       } else if (plan.intent === 'nutrition_for_recipe') {
         let rid = resolveAssistNutritionRecipeId({
           explicitId: plan.nutritionRecipeId,
@@ -230,10 +287,25 @@ export function QuestAssistScreen() {
         role: 'assistant',
         text,
         recipes,
+        fullRecipe,
       };
       setMessages([...allMessages, assistantMsg]);
     },
     [goal, quest],
+  );
+
+  const onRecipeStarPress = useCallback(
+    async (recipe: AssistFullRecipe) => {
+      if (!userId || !goal || !quest) return;
+      if (savedToQuest?.spoonacularId === recipe.spoonacularId) {
+        await clearAttachedRecipe(userId, goal.id, quest.id);
+        setSavedToQuest(null);
+      } else {
+        await setAttachedRecipe(userId, goal.id, quest.id, recipe);
+        setSavedToQuest(recipe);
+      }
+    },
+    [userId, goal, quest, savedToQuest],
   );
 
   const onSend = useCallback(async () => {
@@ -373,6 +445,110 @@ export function QuestAssistScreen() {
                         ) : null}
                       </Pressable>
                     ))}
+                  </View>
+                ) : null}
+                {msg.role === 'assistant' && 'fullRecipe' in msg && msg.fullRecipe ? (
+                  <View
+                    style={[
+                      styles.fullRecipeCard,
+                      {
+                        backgroundColor: colors.surfaceElevated,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.fullRecipeHeader}>
+                      <Text
+                        style={[styles.fullRecipeHeadline, { color: colors.text }]}
+                        numberOfLines={2}
+                      >
+                        {msg.fullRecipe.title}
+                      </Text>
+                      <Pressable
+                        onPress={() => void onRecipeStarPress(msg.fullRecipe!)}
+                        hitSlop={12}
+                        style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          savedToQuest?.spoonacularId === msg.fullRecipe.spoonacularId
+                            ? 'Remove recipe from quest'
+                            : 'Save recipe to quest'
+                        }
+                      >
+                        <Ionicons
+                          name={
+                            savedToQuest?.spoonacularId === msg.fullRecipe.spoonacularId
+                              ? 'star'
+                              : 'star-outline'
+                          }
+                          size={26}
+                          color={colors.primary}
+                        />
+                      </Pressable>
+                    </View>
+                    {msg.fullRecipe.image ? (
+                      <Image
+                        source={{ uri: msg.fullRecipe.image }}
+                        style={styles.fullRecipeHero}
+                      />
+                    ) : null}
+                    {msg.fullRecipe.servings != null || msg.fullRecipe.readyInMinutes != null ? (
+                      <Text style={[styles.fullRecipeMeta, { color: colors.textSecondary }]}>
+                        {[
+                          msg.fullRecipe.servings != null
+                            ? `${msg.fullRecipe.servings} servings`
+                            : null,
+                          msg.fullRecipe.readyInMinutes != null
+                            ? `${msg.fullRecipe.readyInMinutes} min`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </Text>
+                    ) : null}
+                    <Text style={[styles.fullRecipeSectionLabel, { color: colors.text }]}>
+                      Ingredients
+                    </Text>
+                    <ScrollView
+                      nestedScrollEnabled
+                      style={styles.fullRecipeScroll}
+                      showsVerticalScrollIndicator
+                    >
+                      {msg.fullRecipe.ingredientLines.map((line, i) => (
+                        <Text
+                          key={`ing-${msg.id}-${i}`}
+                          style={[styles.fullRecipeLine, { color: colors.text }]}
+                        >
+                          • {line}
+                        </Text>
+                      ))}
+                      <Text
+                        style={[
+                          styles.fullRecipeSectionLabel,
+                          styles.fullRecipeStepsLabel,
+                          { color: colors.text },
+                        ]}
+                      >
+                        Steps
+                      </Text>
+                      {msg.fullRecipe.stepLines.map((line, i) => (
+                        <Text
+                          key={`st-${msg.id}-${i}`}
+                          style={[styles.fullRecipeLine, { color: colors.text }]}
+                        >
+                          {i + 1}. {line}
+                        </Text>
+                      ))}
+                    </ScrollView>
+                    {msg.fullRecipe.sourceUrl ? (
+                      <Pressable
+                        onPress={() => void Linking.openURL(msg.fullRecipe!.sourceUrl!)}
+                      >
+                        <Text style={[styles.recipeLink, { color: colors.primary }]}>
+                          Open original recipe
+                        </Text>
+                      </Pressable>
+                    ) : null}
                   </View>
                 ) : null}
               </View>
@@ -517,6 +693,52 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginHorizontal: spacing.sm,
     marginTop: spacing.xs,
+  },
+  fullRecipeCard: {
+    marginTop: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: spacing.md,
+    maxHeight: 420,
+  },
+  fullRecipeHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  fullRecipeHeadline: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  fullRecipeHero: {
+    width: '100%',
+    height: 120,
+    borderRadius: radius.sm,
+    marginBottom: spacing.sm,
+    backgroundColor: '#e8e8e8',
+  },
+  fullRecipeMeta: {
+    fontSize: 13,
+    marginBottom: spacing.sm,
+  },
+  fullRecipeSectionLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: spacing.xs,
+  },
+  fullRecipeStepsLabel: {
+    marginTop: spacing.md,
+  },
+  fullRecipeScroll: {
+    maxHeight: 220,
+  },
+  fullRecipeLine: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: spacing.xs,
   },
   composer: {
     flexDirection: 'row',

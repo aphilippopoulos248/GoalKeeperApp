@@ -30,36 +30,45 @@ export type QuestAssistHistoryEntry = {
   text: string;
   /** Spoonacular ids for cards the assistant attached (most recent turn). */
   recipeIds?: number[];
+  /** When the assistant showed a full recipe card. */
+  fullRecipeSpoonacularId?: number;
 };
 
 export type QuestAssistPlan = {
-  intent: 'chat_only' | 'suggest_recipes' | 'nutrition_for_recipe';
+  intent: 'chat_only' | 'suggest_recipes' | 'nutrition_for_recipe' | 'full_recipe';
   reply: string;
   nutritionRecipeId: number | null;
   nutritionRecipeTitleHint: string | null;
+  fullRecipeSpoonacularId: number | null;
+  fullRecipeTitleHint: string | null;
 };
 
-const PLANNER_SYSTEM = `You are the routing brain for a short "quest assist" chat. The app may attach recipe cards OR nutrient data from Spoonacular—you decide what is needed for this turn.
+const PLANNER_SYSTEM = `You are the routing brain for a short "quest assist" chat. The app may attach recipe cards, full recipes (ingredients + steps), or nutrient data from Spoonacular—you decide what is needed for this turn.
 
 Output a single JSON object only (no markdown fences) with exactly these keys:
-- "intent": one of "chat_only", "suggest_recipes", "nutrition_for_recipe"
+- "intent": one of "chat_only", "suggest_recipes", "nutrition_for_recipe", "full_recipe"
 - "reply": string — plain text, no markdown. Must **directly answer** the user's latest message in a natural way.
-- "nutritionRecipeId": number or null — use when intent is nutrition_for_recipe and the recipe is in "Recipes shown in this chat" (match by title or what they refer to).
-- "nutritionRecipeTitleHint": string or null — only if you need nutrition but id is unknown: put the exact or best dish name to search (e.g. user names something not in the list).
+- "nutritionRecipeId": number or null — use when intent is nutrition_for_recipe and the recipe is in "Recipes shown in this chat".
+- "nutritionRecipeTitleHint": string or null — only if nutrition id is unknown: best dish name to search.
+- "fullRecipeSpoonacularId": number or null — use when intent is full_recipe and the recipe is in "Recipes shown in this chat".
+- "fullRecipeTitleHint": string or null — when user names a dish not in the list, or id unknown: dish name to look up.
 
-Intent rules (read carefully):
-1) **nutrition_for_recipe** — User asks how nutritious/healthy something is, wants calories, macros, micronutrients, a nutrition breakdown, "is this good for me?", etc., for **one** dish they are already discussing or that appeared in the chat. If they say "this recipe", "that one", "the first", "I like this", "tell me how nutritious it is", pick the right id from the list (most recent card is usually what "this" means after they expressed a preference).
+Intent rules:
+1) **full_recipe** — User wants **ingredients and/or step-by-step instructions** for a **specific** dish ("recipe for lasagna", "how do I make X", "full instructions", "what goes in…", "walk me through"). Prefer an id from the list when they refer to a shown card. **Do not** use for vague "more ideas" without a specific dish.
 
-2) **suggest_recipes** — User clearly wants **new** meal/recipe **ideas** or alternatives ("what should I cook", "more ideas", "something else"). **Do not** use if they already chose one and are only asking a follow-up (nutrition, timing, how to cook it) unless they also explicitly ask for more options.
+2) **nutrition_for_recipe** — User asks how nutritious/healthy something is, calories, macros, micronutrients, for **one** dish. Pick id from the list when they say "this recipe", etc.
 
-3) **chat_only** — Motivation, planning, how to do the quest, generic cooking tips without needing new API recipes or a full nutrient label, non-food quests, clarifying questions.
+3) **suggest_recipes** — User wants **new** meal/recipe **ideas** or browsing ("what should I cook", "more options"). Card grid only, not full instructions.
 
-**Critical:** Only one intent per turn. If the user only wants nutrition info for a recipe they like, use **nutrition_for_recipe**, not suggest_recipes.
+4) **chat_only** — Motivation, planning, generic tips without API recipe/nutrition/full detail, non-food quests.
+
+**Critical:** Only one intent per turn. "Recipe for X" → **full_recipe**, not suggest_recipes.
 
 Reply rules:
-- For **nutrition_for_recipe**: start with 1–2 friendly sentences; the app will append a nutrient list. Do not invent numbers.
-- For **suggest_recipes**: short intro only (e.g. one sentence); recipe cards may appear below.
-- For **chat_only**: complete answer in "reply" only.`;
+- **full_recipe**: 1–2 short sentences; the app will show ingredients and steps below. Do not invent ingredients.
+- **nutrition_for_recipe**: 1–2 sentences; app appends nutrient list.
+- **suggest_recipes**: one short intro; cards below.
+- **chat_only**: complete answer in "reply".`;
 
 function buildPlannerUserPayload(params: {
   goalTitle: string;
@@ -78,7 +87,13 @@ function buildPlannerUserPayload(params: {
         h.role === 'assistant' && h.recipeIds && h.recipeIds.length > 0
           ? ` [recipe card ids: ${h.recipeIds.join(', ')}]`
           : '';
-      return `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.text.trim()}${ids}`;
+      const fullId =
+        h.role === 'assistant' &&
+        typeof h.fullRecipeSpoonacularId === 'number' &&
+        Number.isFinite(h.fullRecipeSpoonacularId)
+          ? ` [full recipe id: ${h.fullRecipeSpoonacularId}]`
+          : '';
+      return `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.text.trim()}${ids}${fullId}`;
     })
     .join('\n');
 
@@ -90,7 +105,7 @@ function buildPlannerUserPayload(params: {
     `Today's quest: ${params.questTitle}`,
     `Quest details: ${params.questDescription}`,
     '',
-    '## Recipes already shown in this chat (id → title). Use these ids for nutrition_for_recipe when the user refers to them.',
+    '## Recipes already shown in this chat (id → title). Use ids for nutrition_for_recipe and full_recipe when the user refers to them.',
     JSON.stringify(params.recentRecipes),
     '',
     '## Conversation so far',
@@ -117,7 +132,8 @@ function parseQuestAssistPlan(content: string): QuestAssistPlan | null {
   if (
     intent !== 'chat_only' &&
     intent !== 'suggest_recipes' &&
-    intent !== 'nutrition_for_recipe'
+    intent !== 'nutrition_for_recipe' &&
+    intent !== 'full_recipe'
   ) {
     return null;
   }
@@ -130,13 +146,38 @@ function parseQuestAssistPlan(content: string): QuestAssistPlan | null {
     typeof raw.nutritionRecipeTitleHint === 'string' && raw.nutritionRecipeTitleHint.trim()
       ? raw.nutritionRecipeTitleHint.trim()
       : null;
+
+  let fullRecipeSpoonacularId: number | null = null;
+  if (
+    typeof raw.fullRecipeSpoonacularId === 'number' &&
+    Number.isFinite(raw.fullRecipeSpoonacularId)
+  ) {
+    fullRecipeSpoonacularId = raw.fullRecipeSpoonacularId;
+  }
+  const fullRecipeTitleHint =
+    typeof raw.fullRecipeTitleHint === 'string' && raw.fullRecipeTitleHint.trim()
+      ? raw.fullRecipeTitleHint.trim()
+      : null;
+
   return {
     intent,
     reply,
     nutritionRecipeId,
     nutritionRecipeTitleHint,
+    fullRecipeSpoonacularId,
+    fullRecipeTitleHint,
   };
 }
+
+const emptyHints = (): Pick<
+  QuestAssistPlan,
+  'nutritionRecipeId' | 'nutritionRecipeTitleHint' | 'fullRecipeSpoonacularId' | 'fullRecipeTitleHint'
+> => ({
+  nutritionRecipeId: null,
+  nutritionRecipeTitleHint: null,
+  fullRecipeSpoonacularId: null,
+  fullRecipeTitleHint: null,
+});
 
 function heuristicPlan(params: {
   goalTitle: string;
@@ -170,10 +211,36 @@ function heuristicPlan(params: {
       u,
     );
 
+  const wantsFullRecipe =
+    /\b(recipe\s+for|how\s+(do\s+i|to)\s+make|how\s+to\s+cook|full\s+recipe|ingredients\s+(for|to)|step\s*by\s*step|instructions\s+for|cook\s+this|make\s+this)\b/.test(
+      u,
+    ) || /\bwalk\s+me\s+through\b/.test(u);
+
+  if (wantsFullRecipe && !wantsNewRecipes) {
+    if (lastId != null) {
+      return {
+        intent: 'full_recipe',
+        reply: 'Here is the full recipe with ingredients and steps:',
+        ...emptyHints(),
+        fullRecipeSpoonacularId: lastId,
+        fullRecipeTitleHint: null,
+      };
+    }
+    const hint = params.latestUserMessage.trim().slice(0, 120);
+    return {
+      intent: 'full_recipe',
+      reply: 'Here is a recipe that matches what you asked for:',
+      ...emptyHints(),
+      fullRecipeSpoonacularId: null,
+      fullRecipeTitleHint: hint || null,
+    };
+  }
+
   if (wantsNutrition && lastId != null && !wantsNewRecipes) {
     return {
       intent: 'nutrition_for_recipe',
       reply: 'Here is a nutrient breakdown for that recipe (per-serving estimate):',
+      ...emptyHints(),
       nutritionRecipeId: lastId,
       nutritionRecipeTitleHint: null,
     };
@@ -183,16 +250,14 @@ function heuristicPlan(params: {
     return {
       intent: 'suggest_recipes',
       reply: fallbackQuestAssistIntro(true),
-      nutritionRecipeId: null,
-      nutritionRecipeTitleHint: null,
+      ...emptyHints(),
     };
   }
 
   return {
     intent: 'chat_only',
     reply: '',
-    nutritionRecipeId: null,
-    nutritionRecipeTitleHint: null,
+    ...emptyHints(),
   };
 }
 

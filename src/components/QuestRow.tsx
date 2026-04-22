@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import type { AssistFullRecipe } from '../services/spoonacularRecipes';
 import { Quest } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
@@ -12,6 +13,8 @@ type QuestRowProps = {
   /** Use inside GoalQuestCard-style wrapper (no outer border; transparent body). */
   variant?: 'default' | 'inCard';
   onAssistPress?: () => void;
+  /** Recipe the user saved from AI Assist for this quest. */
+  attachedRecipe?: AssistFullRecipe;
 };
 
 export function QuestRow({
@@ -20,6 +23,7 @@ export function QuestRow({
   onToggle,
   variant = 'default',
   onAssistPress,
+  attachedRecipe,
 }: QuestRowProps) {
   const { colors } = useAppTheme();
   const isInCard = variant === 'inCard';
@@ -67,6 +71,35 @@ export function QuestRow({
           <Text style={[styles.points, { color: colors.primary }]}>
             +{quest.points} pts
           </Text>
+          {attachedRecipe ? (
+            <View
+              style={[
+                styles.savedRecipeRow,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              {attachedRecipe.image ? (
+                <Image
+                  source={{ uri: attachedRecipe.image }}
+                  style={styles.savedRecipeThumb}
+                />
+              ) : null}
+              <View style={styles.savedRecipeCopy}>
+                <View style={styles.savedRecipeLabelRow}>
+                  <Ionicons name="star" size={14} color={colors.primary} />
+                  <Text style={[styles.savedRecipeLabel, { color: colors.textSecondary }]}>
+                    Saved recipe
+                  </Text>
+                </View>
+                <Text
+                  style={[styles.savedRecipeTitle, { color: colors.text }]}
+                  numberOfLines={1}
+                >
+                  {attachedRecipe.title}
+                </Text>
+              </View>
+            </View>
+          ) : null}
         </View>
       </Pressable>
       {onAssistPress ? (
@@ -143,6 +176,41 @@ const styles = StyleSheet.create({
   points: {
     marginTop: spacing.sm,
     fontSize: 13,
+    fontWeight: '600',
+  },
+  savedRecipeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.sm,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.sm,
+    minHeight: 48,
+  },
+  savedRecipeThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sm,
+    backgroundColor: '#e8e8e8',
+  },
+  savedRecipeCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  savedRecipeLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 2,
+  },
+  savedRecipeLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  savedRecipeTitle: {
+    fontSize: 14,
     fontWeight: '600',
   },
 });
