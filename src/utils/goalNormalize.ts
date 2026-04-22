@@ -61,11 +61,17 @@ export function normalizeCheckpoint(raw: unknown): Checkpoint | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
   if (typeof o.id !== 'string' || typeof o.title !== 'string') return null;
-  return {
+  const cp: Checkpoint = {
     id: o.id,
     title: o.title,
     done: typeof o.done === 'boolean' ? o.done : false,
   };
+  if (o.revealed === false) cp.revealed = false;
+  const wo = o.weekOffset;
+  if (typeof wo === 'number' && Number.isFinite(wo)) {
+    cp.weekOffset = Math.max(1, Math.round(wo));
+  }
+  return cp;
 }
 
 export function normalizeGoal(raw: unknown): Goal | null {

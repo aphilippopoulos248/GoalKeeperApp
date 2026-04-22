@@ -30,6 +30,8 @@ type CheckpointRow = {
   title: string;
   done: boolean;
   sort_order: number;
+  content_revealed?: boolean | null;
+  week_offset?: number | null;
 };
 
 type QuestRow = {
@@ -45,11 +47,19 @@ type QuestRow = {
 };
 
 function rowToCheckpoint(r: CheckpointRow): Checkpoint {
-  return {
+  const cp: Checkpoint = {
     id: r.id,
     title: r.title,
     done: r.done,
   };
+  if (r.content_revealed === false) {
+    cp.revealed = false;
+  }
+  const wo = r.week_offset;
+  if (typeof wo === 'number' && Number.isFinite(wo)) {
+    cp.weekOffset = Math.max(1, Math.round(wo));
+  }
+  return cp;
 }
 
 function rowToQuest(r: QuestRow): Quest {
@@ -195,6 +205,8 @@ async function upsertGoalTree(userId: string, g: Goal): Promise<void> {
     title: c.title,
     done: c.done,
     sort_order: i,
+    content_revealed: c.revealed !== false,
+    week_offset: typeof c.weekOffset === 'number' && Number.isFinite(c.weekOffset) ? c.weekOffset : null,
   }));
 
   if (cpUpserts.length) {

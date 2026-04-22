@@ -22,6 +22,7 @@ import {
 } from '../services/supabase/progressJournalRepository';
 import { migrateLegacyLocalData } from '../services/supabase/legacyMigration';
 import {
+  generateMilestoneFromContext,
   GoalPlannerError,
   parseLifeBusySlotsFromMessage,
   regenerateDailyQuests,
@@ -67,6 +68,13 @@ type ActiveGoalsContextValue = {
   getGoalById: (id: string) => Goal | undefined;
   removeGoal: (goalId: string) => void;
   toggleCheckpoint: (goalId: string, checkpointId: string) => void;
+  /**
+   * Generate AI milestone copy for an unlocked placeholder checkpoint. Requires sign-in and API key.
+   */
+  revealCheckpoint: (
+    goalId: string,
+    checkpointId: string,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
   updateDailyQuestSchedule: (
     goalId: string,
     questId: string,
@@ -182,8 +190,10 @@ function enrichmentToDailyQuests(goalId: string, enrichment: GoalPlannerFullResu
 function enrichmentToCheckpoints(goalId: string, enrichment: GoalPlannerFullResult): Checkpoint[] {
   return enrichment.checkpoints.map((c, i) => ({
     id: `${goalId}-cp-${i + 1}`,
-    title: `Week ${c.weekOffset}: ${c.label}`,
+    title: `Milestone ${i + 1}`,
     done: false,
+    revealed: false,
+    weekOffset: c.weekOffset,
   }));
 }
 
@@ -657,6 +667,67 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     goalsRef.current = working;
   }, [storageReady]);
 
+  /** Refresh one goal’s dailies in place (stable quest ids), e.g. after a milestone is revealed. */
+  const refreshDailyQuestsForGoalId = useCallback(
+    async (goalId: string) => {
+      if (!storageReady) return;
+      const todayIso = new Date().toISOString();
+      const journal = journalContextForAiRef.current.trim() || undefined;
+      let working: Goal[] = goalsRef.current.map((g) => ({
+        ...g,
+        dailyQuests: g.dailyQuests?.map((q) => ({ ...q })),
+      }));
+      const goal = working.find((g) => g.id === goalId);
+      if (!goal || goal.completed) return;
+      const questCount = dailyQuestCountForPriority(parseGoalPriority(goal.priority));
+      const dailies = (goal.dailyQuests ?? []).filter((q) => q.kind === 'daily');
+      if (dailies.length < questCount) return;
+      const sortedDailies = sortDailiesByDayOrder(dailies);
+      if (sortedDailies.length !== questCount) return;
+      try {
+        const dailyQuestsRaw = await regenerateDailyQuests({
+          title: goal.title,
+          description: goal.description,
+          targetDateIso: effectiveTargetDateIso(goal),
+          todayIso,
+          completedCheckpointCount: goal.checkpoints.filter((c) => c.done).length,
+          checkpointTitles: goal.checkpoints.map((c) => c.title),
+          upcomingCheckpointTitles: goal.checkpoints
+            .filter((c) => !c.done)
+            .map((c) => c.title),
+          totalCheckpointCount: goal.checkpoints.length,
+          dailyQuestCount: questCount,
+          milestoneFrequency: parseMilestoneFrequency(goal.milestoneFrequency),
+          goalType: parseGoalType(goal.goalType),
+          reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
+            lifeScheduleSlotsRef.current,
+            working,
+            goal.id,
+          ),
+          previousDailyQuests: sortedDailies.map((q) => ({
+            title: q.title,
+            description: q.description,
+          })),
+          userProgressJournal: journal,
+        });
+        if (dailyQuestsRaw.length !== questCount) return;
+        const newDailies = applyPlannedDailiesPreservingIds(
+          goal.dailyQuests!,
+          sortedDailies,
+          dailyQuestsRaw,
+        );
+        working = working.map((g) =>
+          g.id === goal.id ? { ...g, dailyQuests: newDailies } : g,
+        );
+        setGoals(working);
+        goalsRef.current = working;
+      } catch (e) {
+        console.error('[refreshDailyQuestsForGoalId]', goal.id, e);
+      }
+    },
+    [storageReady],
+  );
+
   const submitProgressJournal = useCallback(
     async (body: string, source: JournalEntrySource) => {
       const trimmed = body.trim();
@@ -759,6 +830,79 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     return { ok: true };
   }, [userId, storageReady, refreshAllDailyQuestsForDebug]);
 
+  const revealCheckpoint = useCallback(
+    async (goalId: string, checkpointId: string) => {
+      if (userId === null) {
+        return { ok: false as const, error: 'Sign in to unlock milestones with AI.' };
+      }
+      const snapshot = goalsRef.current.find((g) => g.id === goalId);
+      if (!snapshot) {
+        return { ok: false as const, error: 'Goal not found.' };
+      }
+      const cpIndex = snapshot.checkpoints.findIndex((c) => c.id === checkpointId);
+      if (cpIndex === -1) {
+        return { ok: false as const, error: 'Milestone not found.' };
+      }
+      const cp = snapshot.checkpoints[cpIndex];
+      if (cp.revealed !== false) {
+        return { ok: false as const, error: 'This milestone is already revealed.' };
+      }
+      const weekOffset =
+        typeof cp.weekOffset === 'number' && Number.isFinite(cp.weekOffset)
+          ? cp.weekOffset
+          : cpIndex + 1;
+      const revealedPriorTitles = snapshot.checkpoints
+        .slice(0, cpIndex)
+        .filter((c) => c.revealed !== false)
+        .map((c) => c.title);
+      let title: string;
+      try {
+        title = await generateMilestoneFromContext({
+          title: snapshot.title,
+          description: snapshot.description,
+          specific: snapshot.specific,
+          measurable: snapshot.measurable,
+          achievable: snapshot.achievable,
+          relevant: snapshot.relevant,
+          timeBound: snapshot.timeBound,
+          goalType: parseGoalType(snapshot.goalType),
+          milestoneFrequency: parseMilestoneFrequency(snapshot.milestoneFrequency),
+          milestoneIndex: cpIndex + 1,
+          totalMilestones: snapshot.checkpoints.length,
+          weekOffset,
+          completedCheckpointCount: snapshot.checkpoints.filter((c) => c.done).length,
+          revealedPriorTitles,
+          userProgressNarrative: journalContextForAiRef.current.trim() || undefined,
+          targetDateIso: effectiveTargetDateIso(snapshot),
+          todayIso: new Date().toISOString(),
+        });
+      } catch (e) {
+        const message =
+          e instanceof GoalPlannerError
+            ? e.message
+            : e instanceof Error && e.message.trim()
+              ? e.message
+              : 'Could not generate milestone.';
+        return { ok: false as const, error: message };
+      }
+      const prev = goalsRef.current;
+      const next = prev.map((g) => {
+        if (g.id !== goalId) return g;
+        return {
+          ...g,
+          checkpoints: g.checkpoints.map((c) =>
+            c.id === checkpointId ? { ...c, title, revealed: true } : c,
+          ),
+        };
+      });
+      setGoals(next);
+      goalsRef.current = next;
+      await refreshDailyQuestsForGoalId(goalId);
+      return { ok: true as const };
+    },
+    [userId, refreshDailyQuestsForGoalId],
+  );
+
   const toggleCheckpoint = useCallback((goalId: string, checkpointId: string) => {
     setGoals((prev) => {
       const oldGoal = prev.find((g) => g.id === goalId);
@@ -768,6 +912,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       if (idx === -1) return prev;
 
       const cp = oldGoal.checkpoints[idx];
+      if (cp.revealed === false) return prev;
       const willComplete = !cp.done;
 
       const nextCheckpoints = oldGoal.checkpoints.map((c, i) => {
@@ -796,6 +941,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       getGoalById,
       removeGoal,
       toggleCheckpoint,
+      revealCheckpoint,
       updateDailyQuestSchedule,
       lifeScheduleSlots,
       applyLifeScheduleMessage,
@@ -812,6 +958,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       getGoalById,
       removeGoal,
       toggleCheckpoint,
+      revealCheckpoint,
       updateDailyQuestSchedule,
       lifeScheduleSlots,
       applyLifeScheduleMessage,

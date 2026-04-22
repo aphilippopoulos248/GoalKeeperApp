@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { GoalMilestoneProgress } from '../components/GoalMilestoneProgress';
 import { Screen } from '../components/Screen';
@@ -23,9 +23,10 @@ type Props = NativeStackScreenProps<GoalsStackParamList, 'GoalDetail'>;
 
 export function GoalDetailScreen({ route, navigation }: Props) {
   const { colors } = useAppTheme();
-  const { getGoalById, removeGoal, toggleCheckpoint } = useActiveGoals();
+  const { getGoalById, removeGoal, toggleCheckpoint, revealCheckpoint } = useActiveGoals();
   const { goalBarEarned } = useQuestProgress();
   const [trackWidth, setTrackWidth] = useState(0);
+  const [revealBusyId, setRevealBusyId] = useState<string | null>(null);
   const g = getGoalById(route.params.goalId);
 
   useEffect(() => {
@@ -144,8 +145,60 @@ export function GoalDetailScreen({ route, navigation }: Props) {
           />
           {g.checkpoints.map((c, i) => {
             const unlocked = isCheckpointUnlockedByBar(c, i, layout, headX);
-            const lockedLabel = `Checkpoint: ${c.title}. Locked. Complete daily quests to earn points; when the bar reaches this milestone, you can tap to complete it.`;
+            const needsReveal = c.revealed === false;
+            const lockedLabel = `${c.title}. Locked. Earn quest points until the bar reaches this milestone.`;
             const openLabel = `Checkpoint: ${c.title}. ${c.done ? 'Completed' : 'Not completed'}. Tap to toggle.`;
+            const unlockPromptLabel = `${c.title}. Ready to unlock. Tap to generate this milestone with AI.`;
+
+            if (unlocked && needsReveal) {
+              const busy = revealBusyId === c.id;
+              return (
+                <Pressable
+                  key={c.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={unlockPromptLabel}
+                  disabled={busy}
+                  onPress={async () => {
+                    setRevealBusyId(c.id);
+                    const res = await revealCheckpoint(g.id, c.id);
+                    setRevealBusyId(null);
+                    if (!res.ok) {
+                      Alert.alert('Could not unlock milestone', res.error);
+                    }
+                  }}
+                  style={({ pressed }) => [
+                    styles.checkpoint,
+                    styles.checkpointUnlock,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.primary,
+                    },
+                    pressed && !busy && { opacity: 0.92 },
+                    busy && { opacity: 0.85 },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.dot,
+                      { backgroundColor: colors.primary },
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      styles.checkpointText,
+                      { color: colors.text, fontWeight: '700' },
+                    ]}
+                  >
+                    Unlock Milestone
+                  </Text>
+                  {busy ? (
+                    <ActivityIndicator color={colors.primary} />
+                  ) : (
+                    <Ionicons name="sparkles-outline" size={20} color={colors.primary} />
+                  )}
+                </Pressable>
+              );
+            }
 
             return unlocked ? (
               <Pressable
@@ -357,6 +410,9 @@ const styles = StyleSheet.create({
   },
   checkpointLocked: {
     opacity: 0.62,
+  },
+  checkpointUnlock: {
+    borderWidth: 2,
   },
   lockedHint: {
     fontSize: 12,

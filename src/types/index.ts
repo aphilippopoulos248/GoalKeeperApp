@@ -39,6 +39,13 @@ export interface Checkpoint {
   id: string;
   title: string;
   done: boolean;
+  /**
+   * When false, title is a placeholder ("Milestone N") until the user unlocks and generates copy.
+   * Omitted or undefined means true (legacy checkpoints).
+   */
+  revealed?: boolean;
+  /** Planner week offset for AI context when revealing milestone text. */
+  weekOffset?: number;
 }
 
 export interface Goal {
