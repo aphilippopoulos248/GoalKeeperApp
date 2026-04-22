@@ -65,13 +65,19 @@ export function MenuScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
   const route = useRoute<RouteProp<RootTabParamList, 'Menu'>>();
   const listRef = useRef<FlatList<DailyQuestEntry>>(null);
-  const { goals, refreshAllDailyQuestsForDebug, submitProgressJournal, clearAiProgressMemory } =
-    useActiveGoals();
+  const {
+    goals,
+    refreshAllDailyQuestsForDebug,
+    submitProgressJournal,
+    clearAiProgressMemory,
+    advanceSimulationDay,
+  } = useActiveGoals();
   const [sortMode, setSortMode] = useState<DailyQuestSortMode>('recommended');
   const [debugRefreshingQuests, setDebugRefreshingQuests] = useState(false);
   const [debugJournalText, setDebugJournalText] = useState('');
   const [debugJournalSaving, setDebugJournalSaving] = useState(false);
   const [debugClearingAiMemory, setDebugClearingAiMemory] = useState(false);
+  const [debugAdvancingDay, setDebugAdvancingDay] = useState(false);
   const {
     completed,
     toggleQuest,
@@ -262,6 +268,37 @@ export function MenuScreen() {
     );
   }, [clearAiProgressMemory]);
 
+  const onDebugAdvanceSimulatedDay = useCallback(() => {
+    if (activeGoals.length === 0) {
+      return;
+    }
+    Alert.alert(
+      'Advance simulated day',
+      'Increments the in-app day counter, updates the AI narrative, and regenerates all daily quests (new quest ids; checkmarks reset), like “refresh all dailies.”',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Advance',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setDebugAdvancingDay(true);
+              try {
+                const res = await advanceSimulationDay();
+                if (!res.ok) {
+                  Alert.alert('Advance day', res.error, [{ text: 'OK' }]);
+                  return;
+                }
+              } finally {
+                setDebugAdvancingDay(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [activeGoals.length, advanceSimulationDay]);
+
   const listFooter = useMemo(
     () => (
       <View style={styles.debugFooter}>
@@ -361,6 +398,36 @@ export function MenuScreen() {
           Saves to your journal and regenerates dailies in place (keeps checkmarks) when you have
           a full set per goal.
         </Text>
+        <Pressable
+          accessibilityLabel="Debug: advance simulated day"
+          disabled={activeGoals.length === 0 || debugAdvancingDay}
+          onPress={onDebugAdvanceSimulatedDay}
+          style={({ pressed }) => [
+            styles.debugButton,
+            {
+              backgroundColor: colors.surfaceElevated,
+              borderColor: colors.border,
+              marginTop: spacing.lg,
+              opacity:
+                activeGoals.length === 0 || debugAdvancingDay
+                  ? 0.5
+                  : pressed
+                    ? 0.88
+                    : 1,
+            },
+          ]}
+        >
+          {debugAdvancingDay ? (
+            <ActivityIndicator color={colors.textSecondary} size="small" />
+          ) : null}
+          <Text style={[styles.debugButtonText, { color: colors.textSecondary }]}>
+            Debug: advance simulated day
+          </Text>
+        </Pressable>
+        <Text style={[styles.debugHint, { color: colors.textSecondary }]}>
+          Simulated day counter (debug, in memory only—resets when you sign out or clear AI
+          memory). Refreshes all daily quests; resets checkmarks.
+        </Text>
       </View>
     ),
     [
@@ -369,10 +436,12 @@ export function MenuScreen() {
       colors.surfaceElevated,
       colors.text,
       colors.textSecondary,
+      debugAdvancingDay,
       debugClearingAiMemory,
       debugJournalSaving,
       debugJournalText,
       debugRefreshingQuests,
+      onDebugAdvanceSimulatedDay,
       onDebugClearAiMemory,
       onDebugRefreshQuests,
       onDebugSaveJournal,

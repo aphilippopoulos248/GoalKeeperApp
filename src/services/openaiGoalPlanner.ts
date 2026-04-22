@@ -461,30 +461,55 @@ function capSynthesisInputs(previousNarrative: string, newEntry: string): {
   return { previousNarrative: p, newEntry: n };
 }
 
-const SYNTHESIZE_PROGRESS_NARRATIVE_SYSTEM = `You integrate a user's new check-in into one counselor-style progress story (plain text, not JSON inside the story).
+export type ProgressNarrativeSynthesisMode = 'merge_journal' | 'advance_day';
+
+const SYNTHESIZE_PROGRESS_NARRATIVE_SYSTEM = `You maintain a counselor-style progress story as plain text (the story itself is not JSON).
 Reply with a single JSON object only (no markdown): { "narrative": string }
 
-Rules for "narrative":
-- Write in third person or neutral second person ("They" / "The user" or "You have…")—supportive, chronological, concise.
-- Merge the previous story (if any) with the new entry. When the new information conflicts with or completes an earlier plan (e.g. they already attended an event they previously planned to attend), **update the facts**: state what happened, and **remove** obsolete open actions that are now done.
-- Prefer short sections if useful: what is **settled / done** vs **open threads / possible next steps**—but keep it one coherent narrative, not bullet lists of raw logs.
-- Do not repeat the same event as both "to do" and "done." The story should reflect a **single current state** for quest planning.
-- Keep names, places, and events the user mentioned. Be specific.
-- Max length for "narrative": stay under ${USER_PROGRESS_JOURNAL_MAX_CHARS} characters.`;
+The user message JSON includes: "mode" ("merge_journal" or "advance_day"), "simulationDay" (positive integer), "previousNarrative" (string, may be empty), "newEntry" (string; for advance_day may be a system note).
 
-export async function synthesizeProgressNarrative(params: {
+**Required format for "narrative" (all modes):**
+- Use explicit day headings: a line must start with exactly "Day 1:", "Day 2:", etc. (number matches the in-app day index). After each heading, write the paragraph(s) for that day. **One block per day number**, in ascending order. Do not use duplicate "Day N:" headings.
+- Supportive, third person or neutral second person, concise. Resolve contradictions: if the user completed something, do not also treat it as still "to do."
+
+**mode "merge_journal":** Merge "newEntry" into the block for **Day {simulationDay}** only (simulationDay tells you which day block to update or create). Preserve other day blocks unless a small fix is needed for consistency. If "previousNarrative" is empty, create "Day {simulationDay}:" with the merged content.
+**mode "advance_day":** The user moved to the next simulated day without a new user-written journal. "simulationDay" is the **new** day number. Append a "Day {simulationDay}:" section (after prior days) with a short neutral line that this new day has started and there is no new check-in text yet. Preserve all previous day blocks' substance.
+
+Max length for "narrative": under ${USER_PROGRESS_JOURNAL_MAX_CHARS} characters.`;
+
+export type SynthesizeProgressNarrativeParams = {
   previousNarrative: string;
   newEntry: string;
-}): Promise<string> {
-  const { previousNarrative, newEntry } = capSynthesisInputs(
-    params.previousNarrative,
-    params.newEntry,
-  );
-  if (!newEntry.trim()) {
+  /** For merge_journal: the day block to update. For advance_day: the new day number after advancing. */
+  simulationDay: number;
+  mode: ProgressNarrativeSynthesisMode;
+};
+
+export async function synthesizeProgressNarrative(
+  params: SynthesizeProgressNarrativeParams,
+): Promise<string> {
+  const mode = params.mode;
+  const simulationDay = Math.max(1, Math.floor(params.simulationDay));
+  if (mode === 'merge_journal' && !params.newEntry.trim()) {
     const fallback = params.previousNarrative.trim();
     return capUserProgressJournal(fallback) ?? '';
   }
-  const user = JSON.stringify({ previousNarrative, newEntry });
+  const { previousNarrative, newEntry } = capSynthesisInputs(
+    params.previousNarrative,
+    mode === 'advance_day'
+      ? (params.newEntry.trim() ||
+          `[System: User advanced to simulated day ${simulationDay} with no new journal; add a short Day ${simulationDay} placeholder.]`)
+      : params.newEntry,
+  );
+  if (mode === 'merge_journal' && !newEntry.trim()) {
+    return capUserProgressJournal(params.previousNarrative.trim()) ?? '';
+  }
+  const user = JSON.stringify({
+    mode,
+    simulationDay,
+    previousNarrative,
+    newEntry,
+  });
   const data = await postChatJson(SYNTHESIZE_PROGRESS_NARRATIVE_SYSTEM, user, {
     temperature: 0.35,
   });
@@ -505,7 +530,7 @@ export async function synthesizeProgressNarrative(params: {
 }
 
 const DAILY_QUEST_USER_JOURNAL_RULES = `User-reported progress (applies when the user JSON field "userProgressJournal" is a non-empty string):
-- This field is a **single reconciled counselor-style story** of the user’s recent progress, **not** a list of raw journal lines. It already merges updates (e.g. if they later say they completed something, the story should reflect the current state, not a stale “to do”).
+- This field is a **single reconciled counselor-style story** of the user’s recent progress, **not** a list of raw journal lines. It may be structured with **"Day 1:", "Day 2:",** etc.—give more weight to **open threads** in the **latest** day sections when planning dailies, while still honoring completed vs pending across the whole story.
 - Use **concrete names** the story mentions (event titles, people, books, places, products, skills). Treat the story as the source of truth for what is **settled** vs what is an **open thread**.
 - **Do not** assign daily quests for actions the story describes as **already completed** or no longer needed. Propose only **sensible next small steps** for **open threads** that still fit this goal.
 - The story may include unrelated life detail: prioritize what fits this goal’s title and description; ignore what does not.

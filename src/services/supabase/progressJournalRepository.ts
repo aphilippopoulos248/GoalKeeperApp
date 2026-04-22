@@ -118,11 +118,11 @@ export async function fetchProgressNarrative(userId: string): Promise<string | n
     console.error('[fetchProgressNarrative]', error);
     return null;
   }
-  const body = (data as { body?: string } | null)?.body;
-  if (typeof body !== 'string' || !body.trim()) {
+  const bodyRaw = (data as { body?: string } | null)?.body;
+  if (typeof bodyRaw !== 'string' || !bodyRaw.trim()) {
     return null;
   }
-  return body.trim();
+  return bodyRaw.trim();
 }
 
 export async function upsertProgressNarrative(

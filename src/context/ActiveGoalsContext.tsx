@@ -89,6 +89,11 @@ type ActiveGoalsContextValue = {
   ) => Promise<{ ok: true; narrative: string } | { ok: false; error: string }>;
   /** Delete stored progress journal entries and clear in-memory AI context (debug). Requires sign-in. */
   clearAiProgressMemory: () => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Debug: increment simulated day, extend narrative, full quest regen (new quest ids; checkmarks reset).
+   * Requires sign-in and at least one active goal with storage ready.
+   */
+  advanceSimulationDay: () => Promise<{ ok: true } | { ok: false; error: string }>;
 };
 
 const ActiveGoalsContext = createContext<ActiveGoalsContextValue | null>(null);
@@ -251,10 +256,20 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
   const lifeScheduleSlotsRef = useRef<ReservedScheduleSlot[]>([]);
   const dailyQuestBackfillInFlight = useRef(new Set<string>());
   const journalContextForAiRef = useRef<string>('');
+  /** In-memory only: which "Day N" block journals merge into; advanced via debug button (not persisted). */
+  const simulationDayForTestRef = useRef(1);
+  const lastUserIdForSimDay = useRef<string | null>(null);
 
   useEffect(() => {
     goalsRef.current = goals;
   }, [goals]);
+
+  useEffect(() => {
+    if (userId !== lastUserIdForSimDay.current) {
+      simulationDayForTestRef.current = 1;
+      lastUserIdForSimDay.current = userId;
+    }
+  }, [userId]);
 
   useEffect(() => {
     lifeScheduleSlotsRef.current = lifeScheduleSlots;
@@ -264,6 +279,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     if (!authReady) return;
     if (userId === null) {
       journalContextForAiRef.current = '';
+      simulationDayForTestRef.current = 1;
       setGoals([...SEED_ACTIVE_GOALS]);
       setLifeScheduleSlots([]);
       lifeScheduleSlotsRef.current = [];
@@ -295,6 +311,8 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
           const synthesized = await synthesizeProgressNarrative({
             previousNarrative: '',
             newEntry: capped,
+            simulationDay: 1,
+            mode: 'merge_journal',
           });
           const up = await upsertProgressNarrative(userId, synthesized);
           if (up.ok) {
@@ -648,7 +666,8 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       if (userId === null) {
         return { ok: false, error: 'Sign in to save progress notes for the AI.' };
       }
-      const previousNarrative = (await fetchProgressNarrative(userId)) ?? '';
+      const previousBody = (await fetchProgressNarrative(userId)) ?? '';
+      const currentSimulationDay = simulationDayForTestRef.current;
       const row = await insertProgressJournalEntry({ userId, body: trimmed, source });
       if (!row) {
         return { ok: false, error: 'Could not save your entry.' };
@@ -656,8 +675,10 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       let synthesized: string;
       try {
         synthesized = await synthesizeProgressNarrative({
-          previousNarrative: previousNarrative,
+          previousNarrative: previousBody,
           newEntry: trimmed,
+          simulationDay: currentSimulationDay,
+          mode: 'merge_journal',
         });
       } catch (e) {
         const message =
@@ -689,8 +710,54 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       return { ok: false as const, error: res.error };
     }
     journalContextForAiRef.current = '';
+    simulationDayForTestRef.current = 1;
     return { ok: true as const };
   }, [userId]);
+
+  const advanceSimulationDay = useCallback(async () => {
+    if (userId === null) {
+      return { ok: false, error: 'Sign in to advance the simulated day.' };
+    }
+    if (!storageReady) {
+      return { ok: false, error: 'Goals are not ready yet.' };
+    }
+    if (goalsRef.current.filter((g) => !g.completed).length === 0) {
+      return { ok: false, error: 'Add an active goal first.' };
+    }
+    const previousBody = (await fetchProgressNarrative(userId)) ?? '';
+    const nextDay = simulationDayForTestRef.current + 1;
+    let synthesized: string;
+    try {
+      synthesized = await synthesizeProgressNarrative({
+        previousNarrative: previousBody,
+        newEntry: '',
+        simulationDay: nextDay,
+        mode: 'advance_day',
+      });
+    } catch (e) {
+      const message =
+        e instanceof GoalPlannerError
+          ? e.message
+          : e instanceof Error && e.message.trim()
+            ? e.message
+            : 'Could not update progress story for the new day.';
+      return { ok: false, error: message };
+    }
+    const up = await upsertProgressNarrative(userId, synthesized);
+    if (!up.ok) {
+      return { ok: false, error: up.error };
+    }
+    simulationDayForTestRef.current = nextDay;
+    journalContextForAiRef.current = synthesized.trim();
+    try {
+      await refreshAllDailyQuestsForDebug();
+    } catch (e) {
+      const message =
+        e instanceof Error && e.message.trim() ? e.message : 'Quest refresh failed.';
+      return { ok: false, error: message };
+    }
+    return { ok: true };
+  }, [userId, storageReady, refreshAllDailyQuestsForDebug]);
 
   const toggleCheckpoint = useCallback((goalId: string, checkpointId: string) => {
     setGoals((prev) => {
@@ -736,6 +803,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       refreshAllDailyQuestsForDebug,
       submitProgressJournal,
       clearAiProgressMemory,
+      advanceSimulationDay,
     }),
     [
       goals,
@@ -751,6 +819,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       refreshAllDailyQuestsForDebug,
       submitProgressJournal,
       clearAiProgressMemory,
+      advanceSimulationDay,
     ],
   );
 
