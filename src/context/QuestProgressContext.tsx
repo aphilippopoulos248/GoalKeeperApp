@@ -157,6 +157,9 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
       if (!quest) return;
 
       const prevDone = completedRef.current[id] ?? false;
+      // Quest completion is one-way from the UI; users cannot un-complete.
+      if (prevDone) return;
+
       const nextCompleted = !prevDone;
       const nextMap = { ...completedRef.current, [id]: nextCompleted };
       completedRef.current = nextMap;

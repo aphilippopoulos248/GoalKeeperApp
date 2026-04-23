@@ -1,12 +1,34 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { ReactNode } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef } from 'react';
+import {
+  Animated,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import Svg, { Circle, G } from 'react-native-svg';
 
 import type { AssistFullExercise } from '../services/exerciseDbRapidApi';
 import type { AssistFullRecipe } from '../services/spoonacularRecipes';
 import { Quest } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
+const RING_BOX = 36;
+const STROKE_PROGRESS = 3.5;
+const STROKE_TRACK = 2.5;
+const R = RING_BOX / 2 - STROKE_PROGRESS / 2 - 1;
+const CIRC = 2 * Math.PI * R;
+const CENTER = RING_BOX / 2;
+
+/** Hold duration before the quest is marked complete (ms). */
+const HOLD_MS = 1300;
+const RESET_MS = 180;
 
 type QuestRowProps = {
   quest: Quest;
@@ -23,8 +45,44 @@ type QuestRowProps = {
   attachedExercise?: AssistFullExercise;
 };
 
-/** Checkbox width + `rowInner` gap; aligns attachment rows with quest title text. */
-const ATTACHED_BLOCK_INDENT = 22 + spacing.md;
+/** Ring column width + `rowInner` gap; aligns attachment rows with quest title text. */
+const ATTACHED_BLOCK_INDENT = RING_BOX + spacing.md;
+
+function HoldProgressRing({
+  borderColor,
+  progressColor,
+  animatedOffset,
+}: {
+  borderColor: string;
+  progressColor: string;
+  animatedOffset: Animated.Value;
+}) {
+  return (
+    <Svg width={RING_BOX} height={RING_BOX} viewBox={`0 0 ${RING_BOX} ${RING_BOX}`}>
+      <G transform={`rotate(-90 ${CENTER} ${CENTER})`}>
+        <Circle
+          cx={CENTER}
+          cy={CENTER}
+          r={R}
+          stroke={borderColor}
+          strokeWidth={STROKE_TRACK}
+          fill="none"
+        />
+        <AnimatedCircle
+          cx={CENTER}
+          cy={CENTER}
+          r={R}
+          stroke={progressColor}
+          strokeWidth={STROKE_PROGRESS}
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={`${CIRC} ${CIRC}`}
+          strokeDashoffset={animatedOffset}
+        />
+      </G>
+    </Svg>
+  );
+}
 
 export function QuestRow({
   quest,
@@ -38,6 +96,58 @@ export function QuestRow({
 }: QuestRowProps) {
   const { colors } = useAppTheme();
   const isInCard = variant === 'inCard';
+
+  const holdOffset = useRef(new Animated.Value(CIRC)).current;
+  const holdRunRef = useRef<Animated.CompositeAnimation | null>(null);
+  const holdFinishedRef = useRef(false);
+
+  useEffect(() => {
+    if (completed) {
+      holdRunRef.current?.stop?.();
+      holdRunRef.current = null;
+      holdOffset.stopAnimation();
+      holdOffset.setValue(CIRC);
+      holdFinishedRef.current = false;
+    }
+  }, [completed, holdOffset]);
+
+  useEffect(() => {
+    return () => {
+      holdRunRef.current?.stop?.();
+      holdOffset.stopAnimation();
+    };
+  }, [holdOffset]);
+
+  const onHoldEnd = useCallback(() => {
+    holdRunRef.current?.stop?.();
+    holdRunRef.current = null;
+    if (!holdFinishedRef.current) {
+      Animated.timing(holdOffset, {
+        toValue: CIRC,
+        duration: RESET_MS,
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [holdOffset]);
+
+  const onHoldStart = useCallback(() => {
+    holdRunRef.current?.stop?.();
+    holdFinishedRef.current = false;
+    holdOffset.setValue(CIRC);
+    const run = Animated.timing(holdOffset, {
+      toValue: 0,
+      duration: HOLD_MS,
+      useNativeDriver: false,
+    });
+    holdRunRef.current = run;
+    run.start(({ finished }) => {
+      holdRunRef.current = null;
+      if (finished) {
+        holdFinishedRef.current = true;
+        onToggle();
+      }
+    });
+  }, [holdOffset, onToggle]);
 
   let attachedRecipeBlock: ReactNode = null;
   if (attachedRecipe) {
@@ -88,6 +198,69 @@ export function QuestRow({
     );
   }
 
+  const incompleteA11yLabel = `${quest.title}. ${quest.description}. ${quest.points} points.`;
+  const incompleteA11yHint =
+    'Hold your finger on this quest until the ring finishes to mark it complete. Release early to cancel.';
+  const completeA11yLabel = `Completed: ${quest.title}`;
+  const completeA11yHint = 'This quest is completed and cannot be unchecked.';
+
+  const rowBody = completed ? (
+    <View
+      style={[styles.rowInner, styles.rowInnerStatic]}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: true, disabled: true }}
+      accessibilityLabel={completeA11yLabel}
+      accessibilityHint={completeA11yHint}
+    >
+      <View
+        style={[
+          styles.completedCircle,
+          {
+            backgroundColor: colors.success,
+            borderColor: colors.success,
+          },
+        ]}
+      >
+        <Ionicons name="checkmark" size={18} color="#ffffff" />
+      </View>
+      <View style={styles.copy}>
+        <Text style={[styles.title, { color: colors.text }]}>{quest.title}</Text>
+        <Text style={[styles.desc, { color: colors.textSecondary }]}>
+          {quest.description}
+        </Text>
+        <Text style={[styles.points, { color: colors.primary }]}>
+          +{quest.points} pts
+        </Text>
+      </View>
+    </View>
+  ) : (
+    <Pressable
+      onPressIn={onHoldStart}
+      onPressOut={onHoldEnd}
+      style={({ pressed }) => [styles.rowInner, { opacity: pressed ? 0.92 : 1 }]}
+      accessibilityRole="button"
+      accessibilityLabel={incompleteA11yLabel}
+      accessibilityHint={incompleteA11yHint}
+    >
+      <View style={styles.ringSlot}>
+        <HoldProgressRing
+          borderColor={colors.border}
+          progressColor={colors.primary}
+          animatedOffset={holdOffset}
+        />
+      </View>
+      <View style={styles.copy}>
+        <Text style={[styles.title, { color: colors.text }]}>{quest.title}</Text>
+        <Text style={[styles.desc, { color: colors.textSecondary }]}>
+          {quest.description}
+        </Text>
+        <Text style={[styles.points, { color: colors.primary }]}>
+          +{quest.points} pts
+        </Text>
+      </View>
+    </Pressable>
+  );
+
   return (
     <View
       style={[
@@ -102,38 +275,7 @@ export function QuestRow({
       ]}
     >
       <View style={styles.mainColumn}>
-        <Pressable
-          onPress={onToggle}
-          style={({ pressed }) => [
-            styles.rowInner,
-            { opacity: pressed ? 0.92 : 1 },
-          ]}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: completed }}
-        >
-          <View
-            style={[
-              styles.checkbox,
-              {
-                borderColor: completed ? colors.success : colors.border,
-                backgroundColor: completed ? colors.success : 'transparent',
-              },
-            ]}
-          >
-            {completed ? (
-              <Ionicons name="checkmark" size={16} color="#ffffff" />
-            ) : null}
-          </View>
-          <View style={styles.copy}>
-            <Text style={[styles.title, { color: colors.text }]}>{quest.title}</Text>
-            <Text style={[styles.desc, { color: colors.textSecondary }]}>
-              {quest.description}
-            </Text>
-            <Text style={[styles.points, { color: colors.primary }]}>
-              +{quest.points} pts
-            </Text>
-          </View>
-        </Pressable>
+        {rowBody}
         {attachedRecipeBlock}
         {attachedExercise ? (
           <View style={{ paddingLeft: ATTACHED_BLOCK_INDENT }}>
@@ -214,19 +356,29 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: spacing.md,
   },
+  rowInnerStatic: {
+    opacity: 1,
+  },
+  ringSlot: {
+    marginTop: 1,
+    width: RING_BOX,
+    height: RING_BOX,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completedCircle: {
+    width: RING_BOX,
+    height: RING_BOX,
+    borderRadius: RING_BOX / 2,
+    borderWidth: 2,
+    marginTop: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   assistBtn: {
     alignSelf: 'flex-start',
     paddingTop: 2,
     marginLeft: spacing.xs,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: radius.sm,
-    borderWidth: 2,
-    marginTop: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   copy: {
     flex: 1,
