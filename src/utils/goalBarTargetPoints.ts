@@ -3,6 +3,8 @@ import type { Goal } from '../types';
 /** Full bar requires more quest points; shorter deadlines use a lower (but still substantial) target. */
 const MIN_TARGET = 120;
 const MAX_TARGET = 420;
+/** Scale on the interpolated target: higher = more quest points to fill the bar. */
+const TARGET_MULTIPLIER = 4;
 const MIN_DAYS = 7;
 const MAX_DAYS = 365;
 const DEFAULT_DAYS = 60;
@@ -29,12 +31,13 @@ export function daysUntilGoalDeadline(targetDateIso: string | undefined): number
 }
 
 /**
- * Full bar cost: shorter time horizons (fewer days left) use a lower target;
- * longer horizons use a higher target (range roughly MIN_TARGET–MAX_TARGET).
+ * Full bar cost: shorter time horizons (fewer days left) use a lower base target;
+ * longer horizons use a higher base (range roughly MIN_TARGET–MAX_TARGET), then scaled by TARGET_MULTIPLIER.
  */
 export function computeGoalBarTargetPoints(goal: Pick<Goal, 'targetDateIso'>): number {
   const days = daysUntilGoalDeadline(goal.targetDateIso);
   const t = (days - MIN_DAYS) / (MAX_DAYS - MIN_DAYS);
   const clampedT = Math.max(0, Math.min(1, t));
-  return Math.round(MIN_TARGET + clampedT * (MAX_TARGET - MIN_TARGET));
+  const base = Math.round(MIN_TARGET + clampedT * (MAX_TARGET - MIN_TARGET));
+  return base * TARGET_MULTIPLIER;
 }
