@@ -80,7 +80,23 @@ export function computeBarHeadX(
   return trackLeft + f * (trackEndX - trackLeft);
 }
 
-/** Whether the bar has advanced to this milestone’s dot (touching the dot edge counts). */
+/**
+ * Whether the progress bar head has reached this milestone’s dot (touching the dot edge counts).
+ * Ignores `checkpoint.done`; use that separately for completion UI.
+ */
+export function isCheckpointReachedByBarGeometry(
+  _checkpoint: Checkpoint,
+  checkpointIndex: number,
+  layout: TrackLayout | null,
+  headX: number,
+): boolean {
+  if (!layout) return false;
+  const x = layout.xs[checkpointIndex];
+  if (x === undefined) return false;
+  return headX >= x - DOT_R;
+}
+
+/** Whether the milestone is complete or the bar head has reached its dot (legacy combined check). */
 export function isCheckpointUnlockedByBar(
   checkpoint: Checkpoint,
   checkpointIndex: number,
@@ -88,33 +104,28 @@ export function isCheckpointUnlockedByBar(
   headX: number,
 ): boolean {
   if (checkpoint.done) return true;
-  if (!layout) return false;
-  const x = layout.xs[checkpointIndex];
-  if (x === undefined) return false;
-  return headX >= x - DOT_R;
+  return isCheckpointReachedByBarGeometry(checkpoint, checkpointIndex, layout, headX);
 }
 
 /**
- * The “current” milestone to work the bar toward: the first index, in order, where the
- * quest bar has not yet reached the checkpoint (or `null` if every checkpoint is
- * already bar-unlocked, e.g. all complete). When the bar has not been measured yet
- * (`layout` null), every incomplete checkpoint reads as not bar-unlocked, so this is 0.
+ * The next milestone in order that is not yet marked complete (`done`), or `null` if all are
+ * complete. `layout` / `headX` are unused but kept for call-site stability.
  */
 export function getCurrentMilestoneToReachIndex(
   checkpoints: Checkpoint[],
-  layout: TrackLayout | null,
-  headX: number,
+  _layout: TrackLayout | null,
+  _headX: number,
 ): number | null {
+  void _layout;
+  void _headX;
   if (checkpoints.length === 0) return null;
-  const idx = checkpoints.findIndex(
-    (c, i) => !isCheckpointUnlockedByBar(c, i, layout, headX),
-  );
+  const idx = checkpoints.findIndex((c) => !c.done);
   return idx === -1 ? null : idx;
 }
 
 /**
- * Bar unlock for a single checkpoint at `earned` quest points, using
- * `REFERENCE_TRACK_WIDTH` and the same `isCheckpointUnlockedByBar` rule.
+ * Whether quest points place the bar head at or past this milestone’s dot (or the checkpoint
+ * is already done). Uses `REFERENCE_TRACK_WIDTH` and `isCheckpointReachedByBarGeometry`.
  */
 export function isMilestoneUnlockedByPoints(
   earned: number,
@@ -123,18 +134,19 @@ export function isMilestoneUnlockedByPoints(
   checkpointIndex: number,
   totalCheckpoints: number,
 ): boolean {
+  if (checkpoint.done) return true;
   if (totalCheckpoints < 1) return false;
   const layout = computeTrackLayout(REFERENCE_TRACK_WIDTH, totalCheckpoints);
   if (!layout) return false;
   const frac = computePointsBarFraction(earned, targetPoints);
   const headX = computeBarHeadX(frac, TRACK_LEFT, layout.trackEndX);
-  return isCheckpointUnlockedByBar(checkpoint, checkpointIndex, layout, headX);
+  return isCheckpointReachedByBarGeometry(checkpoint, checkpointIndex, layout, headX);
 }
 
 /**
- * Indices of incomplete, revealed milestones that cross from “bar locked” to
- * “bar unlocked” as points go from `earnedBefore` to `earnedAfter` (larger),
- * in ascending order. Skips `revealed: false` (legacy pre-title unlock).
+ * Indices of incomplete, revealed milestones whose bar head crosses from before to at/after
+ * their dot as points go from `earnedBefore` to `earnedAfter` (larger), in ascending order.
+ * Skips `revealed: false` (legacy pre-title unlock).
  */
 export function getNewlyUnlockedMilestoneIndices(
   goal: Pick<Goal, 'checkpoints' | 'targetDateIso'>,

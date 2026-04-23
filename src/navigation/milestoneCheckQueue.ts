@@ -23,6 +23,11 @@ export function enqueueMilestoneChecks(items: MilestoneCheckQueueItem[]): boolea
   return wasEmpty && added > 0;
 }
 
+/** Current head without mutating (e.g. re-prompt after “No” once user returns). */
+export function peekMilestoneCheckQueue(): MilestoneCheckQueueItem | undefined {
+  return queue[0];
+}
+
 /** Remove the current head (user answered the prompt for this one). */
 export function shiftMilestoneCheck(): MilestoneCheckQueueItem | undefined {
   return queue.shift();

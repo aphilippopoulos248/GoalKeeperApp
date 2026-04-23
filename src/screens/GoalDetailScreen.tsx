@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,6 +18,7 @@ import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { useQuestProgress } from '../context/QuestProgressContext';
 import {
   navigateToNextMilestoneInQueue,
+  peekMilestoneCheckQueue,
   shiftMilestoneCheck,
 } from '../navigation/milestoneCheckQueue';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
@@ -28,7 +30,7 @@ import {
   computePointsBarFraction,
   computeTrackLayout,
   getCurrentMilestoneToReachIndex,
-  isCheckpointUnlockedByBar,
+  isCheckpointReachedByBarGeometry,
   TRACK_LEFT,
 } from '../utils/milestoneProgressLayout';
 
@@ -40,10 +42,12 @@ export function GoalDetailScreen({ route, navigation }: Props) {
   const { goalBarEarned } = useQuestProgress();
   const [trackWidth, setTrackWidth] = useState(0);
   const [revealBusyId, setRevealBusyId] = useState<string | null>(null);
+  const allowMilestonePromptRef = useRef(true);
   const g = getGoalById(route.params.goalId);
 
   useEffect(() => {
     setTrackWidth(0);
+    allowMilestonePromptRef.current = true;
   }, [route.params.goalId]);
 
   const layout = useMemo(
@@ -98,6 +102,31 @@ export function GoalDetailScreen({ route, navigation }: Props) {
     }
   }, [g, milestoneCheck, navigation]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (g) {
+        const head = peekMilestoneCheckQueue();
+        if (
+          head &&
+          head.goalId === g.id &&
+          allowMilestonePromptRef.current &&
+          route.params.milestoneCheck == null
+        ) {
+          const cp = g.checkpoints.find((c) => c.id === head.checkpointId);
+          if (cp && !cp.done && cp.revealed !== false) {
+            const idx = g.checkpoints.findIndex((c) => c.id === head.checkpointId);
+            if (idx >= 0 && isCheckpointReachedByBarGeometry(cp, idx, layout, headX)) {
+              navigation.setParams({ milestoneCheck: { checkpointId: cp.id } });
+            }
+          }
+        }
+      }
+      return () => {
+        allowMilestonePromptRef.current = true;
+      };
+    }, [g, layout, headX, navigation, route.params.milestoneCheck]),
+  );
+
   const onResolveMilestone = useCallback(
     (sayYes: boolean) => {
       if (!g || !milestoneCheck || !checkCp) {
@@ -116,6 +145,11 @@ export function GoalDetailScreen({ route, navigation }: Props) {
         } else if (checkCp.done) {
           toggleCheckpoint(g.id, checkCp.id);
         }
+      }
+      if (!sayYes) {
+        allowMilestonePromptRef.current = false;
+        navigation.setParams({ milestoneCheck: undefined });
+        return;
       }
       shiftMilestoneCheck();
       navigation.setParams({ milestoneCheck: undefined });
@@ -211,17 +245,57 @@ export function GoalDetailScreen({ route, navigation }: Props) {
             onTrackWidthChange={setTrackWidth}
           />
           {g.checkpoints.map((c, i) => {
-            const unlocked = isCheckpointUnlockedByBar(c, i, layout, headX);
+            const barReached = isCheckpointReachedByBarGeometry(c, i, layout, headX);
             const needsReveal = c.revealed === false;
             const isCurrentToReach = currentMilestoneToReachIndex === i;
-            const nextHint = isCurrentToReach
+            const earnHint = isCurrentToReach
               ? ' Current target milestone. Earn quest points until the bar reaches this one.'
               : '';
-            const lockedLabel = `${c.title}. Locked. Earn quest points until the bar reaches this milestone.${nextHint}`;
-            const openLabel = `Checkpoint: ${c.title}. ${c.done ? 'Completed' : 'Not completed'}. Tap to toggle.`;
+            const confirmHint = isCurrentToReach
+              ? ' Current target milestone. Answer the confirmation dialog when it appears.'
+              : '';
+            const lockedLabelEarn = `${c.title}. Locked. Earn quest points until the bar reaches this milestone.${earnHint}`;
+            const lockedLabelConfirm = `${c.title}. Locked. Waiting for you to confirm you completed this milestone.${confirmHint}`;
+            const openLabel = `Checkpoint: ${c.title}. Completed. Tap to toggle.`;
             const unlockPromptLabel = `${c.title}. Ready to unlock. Tap to generate this milestone with AI.`;
 
-            if (unlocked && needsReveal) {
+            if (c.done) {
+              return (
+                <Pressable
+                  key={c.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={openLabel}
+                  onPress={() => toggleCheckpoint(g.id, c.id)}
+                  style={({ pressed }) => [
+                    styles.checkpoint,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                    pressed && { opacity: 0.88 },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.dot,
+                      {
+                        backgroundColor: colors.success,
+                      },
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      styles.checkpointText,
+                      { color: colors.text },
+                    ]}
+                  >
+                    {c.title}
+                  </Text>
+                </Pressable>
+              );
+            }
+
+            if (barReached && needsReveal) {
               const busy = revealBusyId === c.id;
               return (
                 <Pressable
@@ -271,44 +345,79 @@ export function GoalDetailScreen({ route, navigation }: Props) {
               );
             }
 
-            return unlocked ? (
-              <Pressable
-                key={c.id}
-                accessibilityRole="button"
-                accessibilityLabel={openLabel}
-                onPress={() => toggleCheckpoint(g.id, c.id)}
-                style={({ pressed }) => [
-                  styles.checkpoint,
-                  {
-                    backgroundColor: colors.surface,
-                    borderColor: colors.border,
-                  },
-                  pressed && { opacity: 0.88 },
-                ]}
-              >
+            if (barReached && !needsReveal) {
+              const lockedLabel = lockedLabelConfirm;
+              return (
                 <View
+                  key={c.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: true }}
+                  accessibilityLabel={lockedLabel}
                   style={[
-                    styles.dot,
+                    styles.checkpoint,
+                    isCurrentToReach ? null : styles.checkpointLocked,
                     {
-                      backgroundColor: c.done ? colors.success : colors.border,
+                      backgroundColor: colors.surface,
+                      borderColor: isCurrentToReach ? colors.primary : colors.border,
+                      borderWidth: isCurrentToReach ? 2 : 1,
+                      opacity: isCurrentToReach ? 1 : 0.62,
                     },
                   ]}
-                />
-                <Text
-                  style={[
-                    styles.checkpointText,
-                    { color: c.done ? colors.text : colors.textSecondary },
-                  ]}
                 >
-                  {c.title}
-                </Text>
-              </Pressable>
-            ) : (
+                  <View
+                    style={[
+                      styles.dot,
+                      {
+                        backgroundColor: isCurrentToReach
+                          ? colors.primary
+                          : colors.border,
+                      },
+                    ]}
+                  />
+                  <View style={styles.checkpointTitleWithBadge}>
+                    <Text
+                      style={[
+                        styles.checkpointText,
+                        { color: isCurrentToReach ? colors.text : colors.textSecondary },
+                      ]}
+                    >
+                      {c.title}
+                    </Text>
+                    {isCurrentToReach ? (
+                      <View
+                        style={[
+                          styles.nextPill,
+                          { backgroundColor: colors.primaryMuted },
+                        ]}
+                      >
+                        <Text
+                          style={[styles.nextPillText, { color: colors.primary }]}
+                        >
+                          Next
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={[styles.lockedHint, { color: colors.textSecondary }]}>
+                    Awaiting confirmation
+                  </Text>
+                  <Ionicons
+                    name="lock-closed"
+                    size={18}
+                    color={colors.textSecondary}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no"
+                  />
+                </View>
+              );
+            }
+
+            return (
               <View
                 key={c.id}
                 accessibilityRole="button"
                 accessibilityState={{ disabled: true }}
-                accessibilityLabel={lockedLabel}
+                accessibilityLabel={lockedLabelEarn}
                 style={[
                   styles.checkpoint,
                   isCurrentToReach ? null : styles.checkpointLocked,
