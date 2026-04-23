@@ -51,7 +51,7 @@ export function GoalSmartPager({ goal }: Props) {
 
   return (
     <View style={styles.wrap}>
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>SMART Goal</Text>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>SMART Analysis</Text>
       <View style={styles.dots}>
         {PAGES.map((p, i) => (
           <View
