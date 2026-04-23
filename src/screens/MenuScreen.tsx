@@ -12,9 +12,9 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Platform,
   Pressable,
+  SectionList,
   StyleSheet,
   Text,
   TextInput,
@@ -52,6 +52,11 @@ import {
 } from '../utils/goalPriority';
 
 type DailyQuestSortMode = 'recommended' | 'goal' | 'priority';
+
+type MenuQuestSection = {
+  key: 'active' | 'completed';
+  data: DailyQuestEntry[];
+};
 
 const DEBUG_NARRATIVE_ALERT_MAX = 4000;
 /** Per-section cap so combined alert text stays readable on device alerts. */
@@ -93,7 +98,7 @@ export function MenuScreen() {
   const showAdminPanel = userEmail === ADMIN_PANEL_EMAIL;
   const navigation = useNavigation<MenuScreenNavigation>();
   const route = useRoute<RouteProp<RootTabParamList, 'Menu'>>();
-  const listRef = useRef<FlatList<DailyQuestEntry>>(null);
+  const listRef = useRef<SectionList<DailyQuestEntry, MenuQuestSection>>(null);
   const {
     goals,
     refreshAllDailyQuestsForDebug,
@@ -199,6 +204,26 @@ export function MenuScreen() {
     [displayedDailyQuestEntries],
   );
 
+  const incompleteDisplayedEntries = useMemo(
+    () => displayedDailyQuestEntries.filter((e) => !completed[e.quest.id]),
+    [displayedDailyQuestEntries, completed],
+  );
+
+  const completedDisplayedEntries = useMemo(
+    () => displayedDailyQuestEntries.filter((e) => !!completed[e.quest.id]),
+    [displayedDailyQuestEntries, completed],
+  );
+
+  const menuQuestSections = useMemo((): MenuQuestSection[] => {
+    const sections: MenuQuestSection[] = [
+      { key: 'active', data: incompleteDisplayedEntries },
+    ];
+    if (completedDisplayedEntries.length > 0) {
+      sections.push({ key: 'completed', data: completedDisplayedEntries });
+    }
+    return sections;
+  }, [incompleteDisplayedEntries, completedDisplayedEntries]);
+
   const awaitingAiQuests = useMemo(
     () =>
       goals.some((g) => {
@@ -223,19 +248,30 @@ export function MenuScreen() {
       let cancelled = false;
       const run = () => {
         if (cancelled) return;
-        const idx = displayedDailyQuestEntries.findIndex((e) => e.quest.id === id);
-        if (idx < 0) {
+        const iActive = incompleteDisplayedEntries.findIndex((e) => e.quest.id === id);
+        const iDone = completedDisplayedEntries.findIndex((e) => e.quest.id === id);
+        if (iActive < 0 && iDone < 0) {
           if (!showDailyLoading) {
             clearFocusParam();
           }
           return;
         }
         try {
-          listRef.current?.scrollToIndex({
-            index: idx,
-            animated: true,
-            viewPosition: 0.12,
-          });
+          if (iActive >= 0) {
+            listRef.current?.scrollToLocation({
+              sectionIndex: 0,
+              itemIndex: iActive,
+              animated: true,
+              viewPosition: 0.12,
+            });
+          } else if (completedDisplayedEntries.length > 0) {
+            listRef.current?.scrollToLocation({
+              sectionIndex: 1,
+              itemIndex: iDone,
+              animated: true,
+              viewPosition: 0.12,
+            });
+          }
         } catch {
           /* list not measured yet */
         }
@@ -249,7 +285,8 @@ export function MenuScreen() {
       };
     }, [
       clearFocusParam,
-      displayedDailyQuestEntries,
+      completedDisplayedEntries,
+      incompleteDisplayedEntries,
       route.params?.focusQuestId,
       showDailyLoading,
     ]),
@@ -642,90 +679,89 @@ export function MenuScreen() {
 
   const listHeader = useMemo(
     () => (
-      <>
-        <DailyQuestProgressCard
-          dailyQuests={displayedDailyQuests}
-          completed={completed}
-          streak={streak}
-          pointsToday={pointsToday}
-          colors={colors}
-        />
-
-        <View style={styles.section}>
-          <View style={styles.dailyHeaderRow}>
-            <Text style={[styles.sectionHeading, { color: colors.text }]}>
-              Daily quests
-            </Text>
-            <View
-              style={[
-                styles.sortPickerWrap,
-                {
-                  backgroundColor: colors.surfaceElevated,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <Picker
-                accessibilityLabel="Sort daily quests"
-                selectedValue={sortMode}
-                onValueChange={(v) => setSortMode(v as DailyQuestSortMode)}
-                style={[styles.sortPicker, { color: colors.text }]}
-                mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-                dropdownIconColor={colors.textSecondary}
-              >
-                <Picker.Item
-                  label="Recommended"
-                  value="recommended"
-                  color={colors.text}
-                />
-                <Picker.Item label="Goal" value="goal" color={colors.text} />
-                <Picker.Item
-                  label="Priority"
-                  value="priority"
-                  color={colors.text}
-                />
-              </Picker>
-            </View>
-          </View>
-          {showDailyLoading ? (
-            <Text style={[styles.loadingHint, { color: colors.textSecondary }]}>
-              Generating quests…
-            </Text>
-          ) : null}
-        </View>
-      </>
+      <DailyQuestProgressCard
+        dailyQuests={displayedDailyQuests}
+        completed={completed}
+        streak={streak}
+        pointsToday={pointsToday}
+        colors={colors}
+      />
     ),
-    [
-      colors,
-      completed,
-      displayedDailyQuests,
-      pointsToday,
-      showDailyLoading,
-      sortMode,
-      streak,
-    ],
+    [colors, completed, displayedDailyQuests, pointsToday, streak],
+  );
+
+  const renderQuestSectionHeader = useCallback(
+    ({ section }: { section: MenuQuestSection }) => {
+      if (section.key === 'active') {
+        return (
+          <View style={styles.section}>
+            <View style={styles.dailyHeaderRow}>
+              <Text style={[styles.sectionHeading, { color: colors.text }]}>
+                Daily quests
+              </Text>
+              <View
+                style={[
+                  styles.sortPickerWrap,
+                  {
+                    backgroundColor: colors.surfaceElevated,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Picker
+                  accessibilityLabel="Sort daily quests"
+                  selectedValue={sortMode}
+                  onValueChange={(v) => setSortMode(v as DailyQuestSortMode)}
+                  style={[styles.sortPicker, { color: colors.text }]}
+                  mode={Platform.OS === 'android' ? 'dropdown' : undefined}
+                  dropdownIconColor={colors.textSecondary}
+                >
+                  <Picker.Item
+                    label="Recommended"
+                    value="recommended"
+                    color={colors.text}
+                  />
+                  <Picker.Item label="Goal" value="goal" color={colors.text} />
+                  <Picker.Item
+                    label="Priority"
+                    value="priority"
+                    color={colors.text}
+                  />
+                </Picker>
+              </View>
+            </View>
+            {showDailyLoading ? (
+              <Text style={[styles.loadingHint, { color: colors.textSecondary }]}>
+                Generating quests…
+              </Text>
+            ) : null}
+          </View>
+        );
+      }
+      return (
+        <View style={[styles.section, styles.completedSectionHeader]}>
+          <Text style={[styles.sectionHeading, { color: colors.text }]}>
+            Quests Completed
+          </Text>
+        </View>
+      );
+    },
+    [colors, showDailyLoading, sortMode],
   );
 
   return (
     <Screen scroll={false}>
-      <FlatList
+      <SectionList
         ref={listRef}
         style={styles.menuList}
-        data={displayedDailyQuestEntries}
+        sections={menuQuestSections}
         keyExtractor={(e) => e.quest.id}
         renderItem={renderQuestItem}
+        renderSectionHeader={renderQuestSectionHeader}
         ListHeaderComponent={listHeader}
         ListFooterComponent={listFooter}
         keyboardShouldPersistTaps="handled"
-        onScrollToIndexFailed={(info) => {
-          setTimeout(() => {
-            listRef.current?.scrollToIndex({
-              index: info.index,
-              animated: true,
-              viewPosition: 0.12,
-            });
-          }, 200);
-        }}
+        stickySectionHeadersEnabled={false}
       />
       <AttachedRecipeModal
         recipe={attachedRecipeViewer}
@@ -768,6 +804,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     marginBottom: spacing.md,
+  },
+  completedSectionHeader: {
+    marginTop: spacing.md,
   },
   questCard: {
     borderRadius: radius.md,
