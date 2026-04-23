@@ -59,6 +59,8 @@ export interface Goal {
   timeBound: string;
   /** ISO date string for the user-chosen deadline (used for AI refresh). */
   targetDateIso?: string;
+  /** When the goal was created (local app or Supabase `created_at`); used for bar target span. */
+  createdAtIso?: string;
   /** Drives daily quest count on the Menu (2 / 3 / 4). Defaults to medium when missing. */
   priority?: GoalPriority;
   /** Milestone spacing; defaults to weekly when missing (legacy goals). */

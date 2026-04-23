@@ -226,6 +226,8 @@ function buildGoalFromInput(input: NewGoalInput, options?: AddGoalOptions): Goal
   const critiqueOpt = options?.achievabilityCritique?.trim() || undefined;
   const critiqueSpread = critiqueOpt ? { achievabilityCritique: critiqueOpt } : {};
 
+  const createdAtIso = new Date().toISOString();
+
   if (!enrichment) {
     return {
       id,
@@ -238,6 +240,7 @@ function buildGoalFromInput(input: NewGoalInput, options?: AddGoalOptions): Goal
       relevant: 'Tied to what matters to you right now.',
       timeBound: `Achieve by ${dateLabel}.`,
       targetDateIso,
+      createdAtIso,
       priority: input.priority,
       milestoneFrequency: input.milestoneFrequency,
       goalType: input.goalType,
@@ -263,6 +266,7 @@ function buildGoalFromInput(input: NewGoalInput, options?: AddGoalOptions): Goal
     relevant: enrichment.relevant,
     timeBound: enrichment.timeBound,
     targetDateIso,
+    createdAtIso,
     priority: input.priority,
     milestoneFrequency: input.milestoneFrequency,
     goalType: enrichment.goalType ?? input.goalType,

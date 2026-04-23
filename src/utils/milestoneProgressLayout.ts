@@ -149,7 +149,7 @@ export function isMilestoneUnlockedByPoints(
  * Skips `revealed: false` (legacy pre-title unlock).
  */
 export function getNewlyUnlockedMilestoneIndices(
-  goal: Pick<Goal, 'checkpoints' | 'targetDateIso'>,
+  goal: Pick<Goal, 'checkpoints' | 'targetDateIso' | 'createdAtIso' | 'milestoneFrequency'>,
   earnedBefore: number,
   earnedAfter: number,
 ): number[] {

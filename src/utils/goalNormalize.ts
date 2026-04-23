@@ -123,6 +123,7 @@ export function normalizeGoal(raw: unknown): Goal | null {
     relevant: o.relevant,
     timeBound: o.timeBound,
     targetDateIso: typeof o.targetDateIso === 'string' ? o.targetDateIso : undefined,
+    createdAtIso: typeof o.createdAtIso === 'string' ? o.createdAtIso : undefined,
     priority: parseGoalPriority(o.priority),
     milestoneFrequency: parseMilestoneFrequency(o.milestoneFrequency),
     goalType: parseGoalType(o.goalType),

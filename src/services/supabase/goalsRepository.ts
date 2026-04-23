@@ -22,6 +22,7 @@ type GoalRow = {
   goal_type: string;
   achievability_critique: string | null;
   completed: boolean;
+  created_at?: string;
 };
 
 type CheckpointRow = {
@@ -125,6 +126,7 @@ function goalFromRow(row: GoalRow, checkpoints: CheckpointRow[], quests: QuestRo
     targetDateIso: row.target_date_iso
       ? new Date(row.target_date_iso).toISOString()
       : undefined,
+    createdAtIso: row.created_at ? new Date(row.created_at).toISOString() : undefined,
     priority: parseGoalPriority(row.priority),
     milestoneFrequency,
     goalType,

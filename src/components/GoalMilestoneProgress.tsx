@@ -21,7 +21,7 @@ const ROW_HEIGHT = 22;
 const TRACK_STROKE = 2;
 
 type Props = {
-  goal: Pick<Goal, 'id' | 'targetDateIso'>;
+  goal: Pick<Goal, 'id' | 'targetDateIso' | 'createdAtIso' | 'checkpoints' | 'milestoneFrequency'>;
   checkpoints: Checkpoint[];
   /** Kept for API compatibility; bar fill uses persisted goal bar points. */
   dailyQuests?: unknown;
@@ -65,7 +65,7 @@ export function GoalMilestoneProgress({
   const earned = goalBarEarned[goal.id] ?? 0;
   const targetPoints = useMemo(
     () => computeGoalBarTargetPoints(goal),
-    [goal.targetDateIso],
+    [goal.targetDateIso, goal.createdAtIso, goal.milestoneFrequency, goal.checkpoints],
   );
   const pointsFraction = useMemo(
     () => computePointsBarFraction(earned, targetPoints),
