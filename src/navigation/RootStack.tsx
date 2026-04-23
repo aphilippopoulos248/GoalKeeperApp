@@ -1,6 +1,6 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import type { Session, User } from '@supabase/supabase-js';
+import type { AuthChangeEvent, Session, User } from '@supabase/supabase-js';
 import {
   createContext,
   useCallback,
@@ -14,6 +14,7 @@ import { ActivityIndicator, Platform, View } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
 import { DailyReflectionOverlay } from '../components/DailyReflectionOverlay';
+import { FirstTimeOnboardingOverlay } from '../components/FirstTimeOnboardingOverlay';
 import { PostLoginGreetingOverlay } from '../components/PostLoginGreetingOverlay';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { useAuthUser } from '../context/AuthUserContext';
@@ -29,6 +30,7 @@ import {
   formatLocalDateYyyyMmDd,
   hasProgressJournalOnDate,
 } from '../services/supabase/progressJournalRepository';
+import { profileNeedsOnboarding } from '../services/supabase/profileRepository';
 import { buildGreetingMessage } from '../lib/buildGreetingMessage';
 import {
   consumeGreetingIntent,
@@ -55,6 +57,8 @@ type PostLoginGreetingContextValue = {
   greetingAccountKind: GreetingAccountKind;
   greetingDisplayName: string;
   onGreetingFinished: () => void;
+  showFirstTimeOnboarding: boolean;
+  onFirstTimeOnboardingFinished: () => void;
 };
 
 const PostLoginGreetingContext =
@@ -94,6 +98,7 @@ function MainShell() {
   useEffect(() => {
     if (!authReady || !userId || !goalsStorageReady) return;
     if (ctx.showGreeting) return;
+    if (ctx.showFirstTimeOnboarding) return;
     if (Platform.OS === 'web') return;
     let cancelled = false;
     void (async () => {
@@ -115,7 +120,7 @@ function MainShell() {
     return () => {
       cancelled = true;
     };
-  }, [authReady, userId, goalsStorageReady, ctx.showGreeting]);
+  }, [authReady, userId, goalsStorageReady, ctx.showGreeting, ctx.showFirstTimeOnboarding]);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -146,11 +151,18 @@ function MainShell() {
   );
 
   const reflectionVisible =
-    showReflection && !ctx.showGreeting && goalsStorageReady;
+    showReflection &&
+    !ctx.showGreeting &&
+    !ctx.showFirstTimeOnboarding &&
+    goalsStorageReady;
 
   return (
     <View style={{ flex: 1 }}>
       <MainAppStack />
+      <FirstTimeOnboardingOverlay
+        visible={ctx.showFirstTimeOnboarding}
+        onFinished={ctx.onFirstTimeOnboardingFinished}
+      />
       <PostLoginGreetingOverlay
         visible={ctx.showGreeting}
         preparing={preparing}
@@ -174,9 +186,20 @@ export function RootStack() {
   const [greetingAccountKind, setGreetingAccountKind] =
     useState<GreetingAccountKind>('returning');
   const [showGreeting, setShowGreeting] = useState(false);
+  const [showFirstTimeOnboarding, setShowFirstTimeOnboarding] = useState(false);
+  const greetingKindCacheRef = useRef<{
+    userId: string;
+    kind: GreetingAccountKind;
+  } | null>(null);
+  const reconcileGenerationRef = useRef(0);
 
   const onGreetingFinished = useCallback(() => {
     setShowGreeting(false);
+    setGreetingUser(null);
+  }, []);
+
+  const onFirstTimeOnboardingFinished = useCallback(() => {
+    setShowFirstTimeOnboarding(false);
     setGreetingUser(null);
   }, []);
 
@@ -190,12 +213,16 @@ export function RootStack() {
       greetingAccountKind,
       greetingDisplayName,
       onGreetingFinished,
+      showFirstTimeOnboarding,
+      onFirstTimeOnboardingFinished,
     }),
     [
       showGreeting,
       greetingAccountKind,
       greetingDisplayName,
       onGreetingFinished,
+      showFirstTimeOnboarding,
+      onFirstTimeOnboardingFinished,
     ],
   );
 
@@ -206,22 +233,55 @@ export function RootStack() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      if (event === 'SIGNED_IN' && nextSession?.user) {
-        const user = nextSession.user;
-        void (async () => {
-          const kind = (await consumeGreetingIntent(user)) ?? 'returning';
-          setGreetingAccountKind(kind);
-          setGreetingUser(user);
-          setShowGreeting(true);
-        })();
-      }
+    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, nextSession) => {
+      setSession(nextSession);
+
       if (event === 'SIGNED_OUT') {
+        reconcileGenerationRef.current += 1;
+        greetingKindCacheRef.current = null;
         setShowGreeting(false);
+        setShowFirstTimeOnboarding(false);
         setGreetingUser(null);
         setGreetingAccountKind('returning');
+        return;
       }
-      setSession(nextSession);
+
+      if (event !== 'INITIAL_SESSION' && event !== 'SIGNED_IN') {
+        return;
+      }
+
+      const user = nextSession?.user;
+      if (!user) {
+        return;
+      }
+
+      const gen = ++reconcileGenerationRef.current;
+
+      void (async () => {
+        let kind: GreetingAccountKind;
+        if (greetingKindCacheRef.current?.userId === user.id) {
+          kind = greetingKindCacheRef.current.kind;
+        } else {
+          const consumed = await consumeGreetingIntent(user);
+          kind = consumed ?? 'returning';
+          greetingKindCacheRef.current = { userId: user.id, kind };
+        }
+
+        const need = await profileNeedsOnboarding(user.id);
+        if (gen !== reconcileGenerationRef.current) {
+          return;
+        }
+
+        setGreetingUser(user);
+        setGreetingAccountKind(kind);
+        if (need === true) {
+          setShowFirstTimeOnboarding(true);
+          setShowGreeting(false);
+        } else {
+          setShowFirstTimeOnboarding(false);
+          setShowGreeting(true);
+        }
+      })();
     });
 
     return () => {

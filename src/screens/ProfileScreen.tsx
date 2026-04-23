@@ -14,6 +14,10 @@ import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { useQuestProgress } from '../context/QuestProgressContext';
 import { supabase } from '../lib/supabase';
 import { displayNameFromUser } from '../lib/userDisplayName';
+import {
+  fetchProfileOnboardingFields,
+  type ProfileOnboardingFields,
+} from '../services/supabase/profileRepository';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 
@@ -29,34 +33,42 @@ export function ProfileScreen({ navigation }: Props) {
   const goalsCompletedCount = goals.filter((g) => g.completed).length;
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
-  const [profileName, setProfileName] = useState<string | null>(null);
+  const [profileFromDb, setProfileFromDb] = useState<ProfileOnboardingFields | null>(
+    null,
+  );
+  const [authUser, setAuthUser] = useState<User | null>(null);
   const [profileEmail, setProfileEmail] = useState<string | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
 
-    const applyUser = (user: User | null) => {
+    const applyUser = async (user: User | null) => {
       if (cancelled) return;
       if (!user) {
-        setProfileName(null);
+        setProfileFromDb(null);
+        setAuthUser(null);
         setProfileEmail(null);
         setProfileLoading(false);
         return;
       }
-      setProfileName(displayNameFromUser(user));
+      setAuthUser(user);
       setProfileEmail(user.email ?? null);
+      setProfileLoading(true);
+      const row = await fetchProfileOnboardingFields(user.id);
+      if (cancelled) return;
+      setProfileFromDb(row);
       setProfileLoading(false);
     };
 
     void supabase.auth.getUser().then(({ data: { user } }) => {
-      applyUser(user);
+      void applyUser(user);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      applyUser(session?.user ?? null);
+      void applyUser(session?.user ?? null);
     });
 
     return () => {
@@ -64,6 +76,14 @@ export function ProfileScreen({ navigation }: Props) {
       subscription.unsubscribe();
     };
   }, []);
+
+  const trimmedProfileName = profileFromDb?.name?.trim() ?? '';
+  const profileName = trimmedProfileName
+    ? trimmedProfileName
+    : authUser
+      ? displayNameFromUser(authUser)
+      : null;
+  const profileBackground = profileFromDb?.background?.trim() ?? '';
 
   const onLogOut = async () => {
     setLogoutError(null);
@@ -139,6 +159,22 @@ export function ProfileScreen({ navigation }: Props) {
               {profileEmail ?? '—'}
             </Text>
           )}
+
+          {profileBackground ? (
+            <>
+              <Text
+                style={[
+                  styles.fieldLabel,
+                  { color: colors.textSecondary, marginTop: spacing.md },
+                ]}
+              >
+                About you
+              </Text>
+              <Text style={[styles.aboutBody, { color: colors.text }]}>
+                {profileBackground}
+              </Text>
+            </>
+          ) : null}
 
           <View style={styles.statsRow}>
             <View style={styles.statColumn}>
@@ -278,6 +314,11 @@ const styles = StyleSheet.create({
   fieldValue: {
     fontSize: 16,
     fontWeight: '700',
+  },
+  aboutBody: {
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '500',
   },
   statsRow: {
     flexDirection: 'row',
