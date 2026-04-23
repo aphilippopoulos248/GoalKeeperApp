@@ -971,14 +971,11 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
 
       const cp = oldGoal.checkpoints[idx];
       if (cp.revealed === false) return prev;
-      const willComplete = !cp.done;
+      if (cp.done) return prev;
 
-      const nextCheckpoints = oldGoal.checkpoints.map((c, i) => {
-        if (willComplete) {
-          return i <= idx ? { ...c, done: true } : c;
-        }
-        return i >= idx ? { ...c, done: false } : c;
-      });
+      const nextCheckpoints = oldGoal.checkpoints.map((c, i) =>
+        i <= idx ? { ...c, done: true } : c,
+      );
 
       const nextGoals = prev.map((g) =>
         g.id === goalId ? { ...g, checkpoints: nextCheckpoints } : g,

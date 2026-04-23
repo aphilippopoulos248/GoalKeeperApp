@@ -117,8 +117,6 @@ export function GoalDetailScreen({ route, navigation }: Props) {
           if (!checkCp.done) {
             toggleCheckpoint(g.id, checkCp.id);
           }
-        } else if (checkCp.done) {
-          toggleCheckpoint(g.id, checkCp.id);
         }
       }
       if (!sayYes) {
@@ -232,23 +230,22 @@ export function GoalDetailScreen({ route, navigation }: Props) {
               : '';
             const lockedLabelEarn = `${c.title}. Locked. Earn quest points until the bar reaches this milestone.${earnHint}`;
             const lockedLabelConfirm = `${c.title}. Locked. Waiting for you to confirm you completed this milestone.${confirmHint}`;
-            const openLabel = `Checkpoint: ${c.title}. Completed. Tap to toggle.`;
+            const openLabel = `Checkpoint: ${c.title}. Completed.`;
             const unlockPromptLabel = `${c.title}. Ready to unlock. Tap to generate this milestone with AI.`;
 
             if (c.done) {
               return (
-                <Pressable
+                <View
                   key={c.id}
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: true }}
                   accessibilityLabel={openLabel}
-                  onPress={() => toggleCheckpoint(g.id, c.id)}
-                  style={({ pressed }) => [
+                  style={[
                     styles.checkpoint,
                     {
                       backgroundColor: colors.surface,
                       borderColor: colors.border,
                     },
-                    pressed && { opacity: 0.88 },
                   ]}
                 >
                   <View
@@ -267,7 +264,7 @@ export function GoalDetailScreen({ route, navigation }: Props) {
                   >
                     {c.title}
                   </Text>
-                </Pressable>
+                </View>
               );
             }
 
