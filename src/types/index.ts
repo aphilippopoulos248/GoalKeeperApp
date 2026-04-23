@@ -74,6 +74,8 @@ export interface Goal {
 
 export interface Friend {
   id: string;
-  name: string;
-  subtitle?: string;
+  username: string | null;
+  display_name: string | null;
+  name: string | null;
+  avatar_url: string | null;
 }
