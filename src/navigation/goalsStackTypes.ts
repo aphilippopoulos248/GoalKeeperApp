@@ -4,4 +4,5 @@ export type GoalsStackParamList = {
   GoalList: undefined;
   GoalDetail: { goalId: string; milestoneCheck?: MilestoneCheckParam };
   AddGoal: undefined;
+  MilestoneExplain: { goalId: string; checkpointId: string };
 };

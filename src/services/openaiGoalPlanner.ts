@@ -98,7 +98,8 @@ export type GoalPlannerErrorCode =
   | 'network'
   | 'bad_response'
   | 'checkpoint_mismatch'
-  | 'api_error';
+  | 'api_error'
+  | 'aborted';
 
 /** Cap AI-generated milestones per goal (long horizons still get a full year of weekly steps). */
 export const MAX_AI_CHECKPOINTS = 52;
@@ -764,7 +765,7 @@ function normalizeTitleKey(s: string): string {
   return s.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-type PostChatOptions = { temperature?: number };
+type PostChatOptions = { temperature?: number; signal?: AbortSignal };
 
 async function postChatJson(
   system: string,
@@ -792,6 +793,7 @@ async function postChatJson(
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
+      signal: options?.signal,
       body: JSON.stringify({
         model: MODEL,
         temperature,
@@ -802,7 +804,10 @@ async function postChatJson(
         ],
       }),
     });
-  } catch {
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      throw new GoalPlannerError('Request cancelled', 'aborted');
+    }
     throw new GoalPlannerError('Network error calling OpenAI', 'network');
   }
 
@@ -1509,6 +1514,109 @@ ${JSEARCH_MILESTONE_RULES}`;
       ? `${raw.slice(0, MILESTONE_REVEAL_TITLE_MAX).trim()}…`
       : raw;
   return capped || raw;
+}
+
+const EXPLAIN_MILESTONE_MAX = 450;
+
+const EXPLAIN_MILESTONE_SYSTEM = `You explain ONE milestone in a personal goal-tracking app. Reply with JSON only: { "explanation": string }.
+
+Rules:
+- "explanation": **Exactly 2 or 3 short sentences** in plain language only—no lists, no paragraph breaks, no more than 3 sentences. Warm and specific. **Max ${EXPLAIN_MILESTONE_MAX} characters.**
+- Cover what this milestone is for on the path and (briefly) how it relates to the previous/next checkpoint when those titles are in the user JSON—without promising outcomes the goal cannot guarantee.
+- Respect "goalType" in the user JSON: biological = habits/process; skill_based = practice/feedback; outcome_based = concrete steps, no job/relationship guarantees; linear = metrics only when the goal is clearly numeric.
+- No markdown. No JSON except the top-level object.`;
+
+const JSEARCH_EXPLAIN_RULES = `JSearch block (if present in user JSON): a **sample** of listings—use only to make job-search phrasing **credible**; **do not** name employers or job titles from the list or imply a guaranteed offer.`;
+
+export type ExplainMilestoneDetailParams = {
+  title: string;
+  description: string;
+  specific: string;
+  measurable: string;
+  achievable: string;
+  relevant: string;
+  timeBound: string;
+  goalType: GoalType;
+  milestoneFrequency: MilestoneFrequency;
+  /** 1-based index in the plan order. */
+  milestoneIndex: number;
+  totalMilestones: number;
+  weekOffset?: number;
+  checkpointTitle: string;
+  checkpointDone: boolean;
+  neighborBeforeTitle: string | null;
+  neighborAfterTitle: string | null;
+  targetDateIso: string;
+  todayIso: string;
+  signal?: AbortSignal;
+};
+
+export async function explainMilestoneDetail(
+  params: ExplainMilestoneDetailParams,
+): Promise<string> {
+  let jsearchContext: string | null = null;
+  try {
+    jsearchContext = await getJobSearchContextForGoal({
+      title: params.title,
+      description: params.description,
+    });
+  } catch {
+    jsearchContext = null;
+  }
+
+  let spoonacularContext: string | null = null;
+  try {
+    spoonacularContext = await getNutritionContextForGoal({
+      title: params.title,
+      description: params.description,
+    });
+  } catch {
+    spoonacularContext = null;
+  }
+
+  const user = JSON.stringify({
+    goalTitle: params.title.trim(),
+    goalDescription: params.description.trim(),
+    specific: params.specific.trim(),
+    measurable: params.measurable.trim(),
+    achievable: params.achievable.trim(),
+    relevant: params.relevant.trim(),
+    timeBound: params.timeBound.trim(),
+    goalType: parseGoalType(params.goalType),
+    milestoneFrequency: params.milestoneFrequency,
+    milestoneIndex: params.milestoneIndex,
+    totalMilestones: params.totalMilestones,
+    weekOffset: params.weekOffset,
+    checkpointTitle: params.checkpointTitle.trim(),
+    checkpointDone: params.checkpointDone,
+    neighborBeforeTitle: params.neighborBeforeTitle?.trim() || null,
+    neighborAfterTitle: params.neighborAfterTitle?.trim() || null,
+    targetDateIso: params.targetDateIso,
+    todayIso: params.todayIso,
+    ...(jsearchContext ? { jsearchContext } : {}),
+    ...(spoonacularContext ? { nutritionContext: spoonacularContext } : {}),
+  });
+
+  let system = EXPLAIN_MILESTONE_SYSTEM;
+  if (typeof jsearchContext === 'string' && jsearchContext.trim().length > 0) {
+    system = `${system}\n\n${JSEARCH_EXPLAIN_RULES}`;
+  }
+
+  const data = await postChatJson(system, user, {
+    temperature: 0.45,
+    signal: params.signal,
+  });
+  if (!isRecord(data)) {
+    throw new GoalPlannerError('Invalid explanation JSON', 'bad_response');
+  }
+  const raw =
+    typeof data.explanation === 'string' ? data.explanation.trim() : '';
+  if (!raw) {
+    throw new GoalPlannerError('Empty explanation from model', 'bad_response');
+  }
+  return raw.length > EXPLAIN_MILESTONE_MAX
+    ? `${raw.slice(0, EXPLAIN_MILESTONE_MAX).trim()}…`
+    : raw;
 }
 
 export async function planNewGoal(

@@ -232,38 +232,65 @@ export function GoalDetailScreen({ route, navigation }: Props) {
             const lockedLabelConfirm = `${c.title}. Locked. Waiting for you to confirm you completed this milestone.${confirmHint}`;
             const openLabel = `Checkpoint: ${c.title}. Completed.`;
             const unlockPromptLabel = `${c.title}. Ready to unlock. Tap to generate this milestone with AI.`;
+            const showMilestoneHelp = !(barReached && needsReveal);
 
             if (c.done) {
               return (
-                <View
-                  key={c.id}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: true }}
-                  accessibilityLabel={openLabel}
-                  style={[
-                    styles.checkpoint,
-                    {
-                      backgroundColor: colors.surface,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                >
+                <View key={c.id} style={styles.milestoneRowWrap}>
                   <View
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: true }}
+                    accessibilityLabel={openLabel}
                     style={[
-                      styles.dot,
+                      styles.checkpoint,
+                      showMilestoneHelp && styles.checkpointWithHelp,
+                      { marginBottom: 0 },
                       {
-                        backgroundColor: colors.success,
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
                       },
                     ]}
-                  />
-                  <Text
-                    style={[
-                      styles.checkpointText,
-                      { color: colors.text },
-                    ]}
                   >
-                    {c.title}
-                  </Text>
+                    <View
+                      style={[
+                        styles.dot,
+                        {
+                          backgroundColor: colors.success,
+                        },
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.checkpointText,
+                        { color: colors.text },
+                      ]}
+                    >
+                      {c.title}
+                    </Text>
+                  </View>
+                  {showMilestoneHelp ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="More detail about this milestone"
+                      hitSlop={10}
+                      onPress={() =>
+                        navigation.navigate('MilestoneExplain', {
+                          goalId: g.id,
+                          checkpointId: c.id,
+                        })
+                      }
+                      style={({ pressed }) => [
+                        styles.milestoneHelpHit,
+                        pressed && { opacity: 0.75 },
+                      ]}
+                    >
+                      <Ionicons
+                        name="help-circle-outline"
+                        size={20}
+                        color={colors.textSecondary}
+                      />
+                    </Pressable>
+                  ) : null}
                 </View>
               );
             }
@@ -321,13 +348,106 @@ export function GoalDetailScreen({ route, navigation }: Props) {
             if (barReached && !needsReveal) {
               const lockedLabel = lockedLabelConfirm;
               return (
+                <View key={c.id} style={styles.milestoneRowWrap}>
+                  <View
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: true }}
+                    accessibilityLabel={lockedLabel}
+                    style={[
+                      styles.checkpoint,
+                      showMilestoneHelp && styles.checkpointWithHelp,
+                      { marginBottom: 0 },
+                      isCurrentToReach ? null : styles.checkpointLocked,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: isCurrentToReach ? colors.primary : colors.border,
+                        borderWidth: isCurrentToReach ? 2 : 1,
+                        opacity: isCurrentToReach ? 1 : 0.62,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.dot,
+                        {
+                          backgroundColor: isCurrentToReach
+                            ? colors.primary
+                            : colors.border,
+                        },
+                      ]}
+                    />
+                    <View style={styles.checkpointTitleWithBadge}>
+                      <Text
+                        style={[
+                          styles.checkpointText,
+                          { color: isCurrentToReach ? colors.text : colors.textSecondary },
+                        ]}
+                      >
+                        {c.title}
+                      </Text>
+                      {isCurrentToReach ? (
+                        <View
+                          style={[
+                            styles.nextPill,
+                            { backgroundColor: colors.primaryMuted },
+                          ]}
+                        >
+                          <Text
+                            style={[styles.nextPillText, { color: colors.primary }]}
+                          >
+                            Next
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={[styles.lockedHint, { color: colors.textSecondary }]}>
+                      Awaiting confirmation
+                    </Text>
+                    <Ionicons
+                      name="lock-closed"
+                      size={18}
+                      color={colors.textSecondary}
+                      accessibilityElementsHidden
+                      importantForAccessibility="no"
+                    />
+                  </View>
+                  {showMilestoneHelp ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="More detail about this milestone"
+                      hitSlop={10}
+                      onPress={() =>
+                        navigation.navigate('MilestoneExplain', {
+                          goalId: g.id,
+                          checkpointId: c.id,
+                        })
+                      }
+                      style={({ pressed }) => [
+                        styles.milestoneHelpHit,
+                        pressed && { opacity: 0.75 },
+                      ]}
+                    >
+                      <Ionicons
+                        name="help-circle-outline"
+                        size={20}
+                        color={colors.textSecondary}
+                      />
+                    </Pressable>
+                  ) : null}
+                </View>
+              );
+            }
+
+            return (
+              <View key={c.id} style={styles.milestoneRowWrap}>
                 <View
-                  key={c.id}
                   accessibilityRole="button"
                   accessibilityState={{ disabled: true }}
-                  accessibilityLabel={lockedLabel}
+                  accessibilityLabel={lockedLabelEarn}
                   style={[
                     styles.checkpoint,
+                    showMilestoneHelp && styles.checkpointWithHelp,
+                    { marginBottom: 0 },
                     isCurrentToReach ? null : styles.checkpointLocked,
                     {
                       backgroundColor: colors.surface,
@@ -372,7 +492,7 @@ export function GoalDetailScreen({ route, navigation }: Props) {
                     ) : null}
                   </View>
                   <Text style={[styles.lockedHint, { color: colors.textSecondary }]}>
-                    Awaiting confirmation
+                    Locked
                   </Text>
                   <Ionicons
                     name="lock-closed"
@@ -382,70 +502,29 @@ export function GoalDetailScreen({ route, navigation }: Props) {
                     importantForAccessibility="no"
                   />
                 </View>
-              );
-            }
-
-            return (
-              <View
-                key={c.id}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: true }}
-                accessibilityLabel={lockedLabelEarn}
-                style={[
-                  styles.checkpoint,
-                  isCurrentToReach ? null : styles.checkpointLocked,
-                  {
-                    backgroundColor: colors.surface,
-                    borderColor: isCurrentToReach ? colors.primary : colors.border,
-                    borderWidth: isCurrentToReach ? 2 : 1,
-                    opacity: isCurrentToReach ? 1 : 0.62,
-                  },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.dot,
-                    {
-                      backgroundColor: isCurrentToReach
-                        ? colors.primary
-                        : colors.border,
-                    },
-                  ]}
-                />
-                <View style={styles.checkpointTitleWithBadge}>
-                  <Text
-                    style={[
-                      styles.checkpointText,
-                      { color: isCurrentToReach ? colors.text : colors.textSecondary },
+                {showMilestoneHelp ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="More detail about this milestone"
+                    hitSlop={10}
+                    onPress={() =>
+                      navigation.navigate('MilestoneExplain', {
+                        goalId: g.id,
+                        checkpointId: c.id,
+                      })
+                    }
+                    style={({ pressed }) => [
+                      styles.milestoneHelpHit,
+                      pressed && { opacity: 0.75 },
                     ]}
                   >
-                    {c.title}
-                  </Text>
-                  {isCurrentToReach ? (
-                    <View
-                      style={[
-                        styles.nextPill,
-                        { backgroundColor: colors.primaryMuted },
-                      ]}
-                    >
-                      <Text
-                        style={[styles.nextPillText, { color: colors.primary }]}
-                      >
-                        Next
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-                <Text style={[styles.lockedHint, { color: colors.textSecondary }]}>
-                  Locked
-                </Text>
-                <Ionicons
-                  name="lock-closed"
-                  size={18}
-                  color={colors.textSecondary}
-                  accessibilityElementsHidden
-                  importantForAccessibility="no"
-                />
+                    <Ionicons
+                      name="help-circle-outline"
+                      size={20}
+                      color={colors.textSecondary}
+                    />
+                  </Pressable>
+                ) : null}
               </View>
             );
           })}
@@ -654,6 +733,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginBottom: spacing.sm,
+  },
+  milestoneRowWrap: {
+    position: 'relative',
+    marginBottom: spacing.sm,
+  },
+  milestoneHelpHit: {
+    position: 'absolute',
+    top: spacing.md,
+    right: spacing.md,
+    zIndex: 2,
+    padding: 2,
+  },
+  checkpointWithHelp: {
+    paddingRight: 40,
   },
   checkpoint: {
     flexDirection: 'row',
