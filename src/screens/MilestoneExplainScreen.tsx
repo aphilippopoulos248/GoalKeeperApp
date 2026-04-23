@@ -22,7 +22,7 @@ import { parseMilestoneFrequency, parseGoalType } from '../utils/goalNormalize';
 type Props = NativeStackScreenProps<GoalsStackParamList, 'MilestoneExplain'>;
 
 const FADE_MS = 360;
-const TYPE_CHAR_MS = 24;
+const TYPE_CHAR_MS = 16;
 
 export function MilestoneExplainScreen({ route, navigation }: Props) {
   const { goalId, checkpointId } = route.params;
