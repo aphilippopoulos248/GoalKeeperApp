@@ -19,6 +19,7 @@ import { fetchWeeklyQuestsForUser } from '../services/supabase/weeklyQuestsRepos
 import type { Quest } from '../types';
 import { clearAttachedExercise } from '../lib/questAttachedExerciseStorage';
 import { clearAttachedRecipe } from '../lib/questAttachedRecipeStorage';
+import { onGoalAffiliatedDailyQuestCompleted } from '../navigation/milestoneDeferredReprompt';
 import {
   enqueueMilestoneChecks,
   tryNavigateToFirstMilestoneInQueueAfterEnqueue,
@@ -187,6 +188,9 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
           }
           return nextEarned;
         });
+        if (delta > 0 && userId) {
+          queueMicrotask(() => onGoalAffiliatedDailyQuestCompleted(entry.goalId));
+        }
       }
 
       queueMicrotask(() => {

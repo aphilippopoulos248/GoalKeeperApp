@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,8 +16,11 @@ import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { useQuestProgress } from '../context/QuestProgressContext';
 import {
+  clearMilestoneRepromptDefer,
+  deferMilestoneRepromptAfterNo,
+} from '../navigation/milestoneDeferredReprompt';
+import {
   navigateToNextMilestoneInQueue,
-  peekMilestoneCheckQueue,
   shiftMilestoneCheck,
 } from '../navigation/milestoneCheckQueue';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
@@ -42,12 +44,10 @@ export function GoalDetailScreen({ route, navigation }: Props) {
   const { goalBarEarned } = useQuestProgress();
   const [trackWidth, setTrackWidth] = useState(0);
   const [revealBusyId, setRevealBusyId] = useState<string | null>(null);
-  const allowMilestonePromptRef = useRef(true);
   const g = getGoalById(route.params.goalId);
 
   useEffect(() => {
     setTrackWidth(0);
-    allowMilestonePromptRef.current = true;
   }, [route.params.goalId]);
 
   const layout = useMemo(
@@ -102,31 +102,6 @@ export function GoalDetailScreen({ route, navigation }: Props) {
     }
   }, [g, milestoneCheck, navigation]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (g) {
-        const head = peekMilestoneCheckQueue();
-        if (
-          head &&
-          head.goalId === g.id &&
-          allowMilestonePromptRef.current &&
-          route.params.milestoneCheck == null
-        ) {
-          const cp = g.checkpoints.find((c) => c.id === head.checkpointId);
-          if (cp && !cp.done && cp.revealed !== false) {
-            const idx = g.checkpoints.findIndex((c) => c.id === head.checkpointId);
-            if (idx >= 0 && isCheckpointReachedByBarGeometry(cp, idx, layout, headX)) {
-              navigation.setParams({ milestoneCheck: { checkpointId: cp.id } });
-            }
-          }
-        }
-      }
-      return () => {
-        allowMilestonePromptRef.current = true;
-      };
-    }, [g, layout, headX, navigation, route.params.milestoneCheck]),
-  );
-
   const onResolveMilestone = useCallback(
     (sayYes: boolean) => {
       if (!g || !milestoneCheck || !checkCp) {
@@ -147,10 +122,11 @@ export function GoalDetailScreen({ route, navigation }: Props) {
         }
       }
       if (!sayYes) {
-        allowMilestonePromptRef.current = false;
+        deferMilestoneRepromptAfterNo(g.id, checkCp.id);
         navigation.setParams({ milestoneCheck: undefined });
         return;
       }
+      clearMilestoneRepromptDefer(g.id, checkCp.id);
       shiftMilestoneCheck();
       navigation.setParams({ milestoneCheck: undefined });
       navigateToNextMilestoneInQueue();
