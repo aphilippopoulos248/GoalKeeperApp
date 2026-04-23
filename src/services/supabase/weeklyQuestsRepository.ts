@@ -17,7 +17,8 @@ export async function fetchWeeklyQuestsForUser(userId: string): Promise<Quest[]>
     .from('quests')
     .select('*')
     .eq('user_id', userId)
-    .eq('kind', 'weekly')
+    .is('goal_id', null)
+    .like('id', 'weekly-%')
     .order('id', { ascending: true });
 
   if (error) {
@@ -34,7 +35,6 @@ export async function fetchWeeklyQuestsForUser(userId: string): Promise<Quest[]>
         title: string;
         description: string;
         points: number;
-        kind: 'daily' | 'weekly';
         day_order: number | null;
         schedule_start_minute: number | null;
         schedule_duration_minutes: number | null;
@@ -58,7 +58,6 @@ export async function ensureWeeklyQuestRowsInDb(userId: string): Promise<void> {
     title: t.title,
     description: t.description,
     points: t.points,
-    kind: 'weekly' as const,
     day_order: null as number | null,
     schedule_start_minute: null as number | null,
     schedule_duration_minutes: null as number | null,

@@ -104,7 +104,6 @@ create table public.quests (
   title text not null,
   description text not null,
   points integer not null check (points >= 0),
-  kind text not null check (kind in ('daily', 'weekly')),
   day_order integer check (day_order is null or (day_order >= 0 and day_order <= 999)),
   schedule_start_minute integer check (schedule_start_minute is null or (schedule_start_minute >= 0 and schedule_start_minute <= 1439)),
   schedule_duration_minutes integer
@@ -115,7 +114,6 @@ create table public.quests (
 
 create index quests_user_id_idx on public.quests (user_id);
 create index quests_goal_id_idx on public.quests (goal_id);
-create index quests_user_kind_idx on public.quests (user_id, kind);
 
 -- ---------------------------------------------------------------------------
 create table public.quest_completions (

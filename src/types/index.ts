@@ -16,14 +16,11 @@ export type GoalType =
   | 'skill_based'
   | 'outcome_based';
 
-export type QuestKind = 'daily' | 'weekly';
-
 export interface Quest {
   id: string;
   title: string;
   description: string;
   points: number;
-  kind: QuestKind;
   /**
    * Lower = earlier in the typical day (e.g. morning exercise); higher = later (e.g. wind-down reading).
    * Set by AI (0–999) so the menu can sort dailies across all goals.

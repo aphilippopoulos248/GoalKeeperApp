@@ -32,7 +32,7 @@ export function ScheduleAiAssistant() {
       goals.some(
         (g) =>
           !g.completed &&
-          (g.dailyQuests?.filter((q) => q.kind === 'daily').length ?? 0) > 0,
+          (g.dailyQuests?.length ?? 0) > 0,
       ),
     [goals],
   );

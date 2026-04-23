@@ -203,7 +203,7 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
 
       queueMicrotask(() => {
         if (userId && entry?.goalId) void upsertQuestCompletion(userId, id, nextCompleted);
-        if (nextCompleted && userId && entry?.goalId && quest.kind === 'daily') {
+        if (nextCompleted && userId && entry?.goalId) {
           void clearAttachedRecipe(userId, entry.goalId, id);
           void clearAttachedExercise(userId, entry.goalId, id);
         }

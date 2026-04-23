@@ -40,9 +40,7 @@ export function normalizeQuest(raw: unknown): Quest | null {
   if (typeof o.id !== 'string' || typeof o.title !== 'string') return null;
   if (typeof o.description !== 'string') return null;
   const points = o.points;
-  const kind = o.kind;
   if (typeof points !== 'number' || !Number.isFinite(points)) return null;
-  if (kind !== 'daily' && kind !== 'weekly') return null;
   const dayOrderRaw = o.dayOrder;
   const dayOrder =
     typeof dayOrderRaw === 'number' && Number.isFinite(dayOrderRaw)
@@ -63,7 +61,6 @@ export function normalizeQuest(raw: unknown): Quest | null {
     title: o.title,
     description: o.description,
     points,
-    kind,
     ...(dayOrder !== undefined ? { dayOrder } : {}),
     ...(scheduleStartMinute !== undefined ? { scheduleStartMinute } : {}),
     ...(scheduleDurationMinutes !== undefined ? { scheduleDurationMinutes } : {}),

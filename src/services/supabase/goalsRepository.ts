@@ -41,7 +41,6 @@ type QuestRow = {
   title: string;
   description: string;
   points: number;
-  kind: 'daily' | 'weekly';
   day_order: number | null;
   schedule_start_minute: number | null;
   schedule_duration_minutes: number | null;
@@ -69,7 +68,6 @@ function rowToQuest(r: QuestRow): Quest {
     title: r.title,
     description: r.description,
     points: r.points,
-    kind: r.kind,
   };
   if (r.day_order != null) q.dayOrder = r.day_order;
   if (r.schedule_start_minute != null) q.scheduleStartMinute = r.schedule_start_minute;
@@ -235,7 +233,6 @@ async function upsertGoalTree(userId: string, g: Goal): Promise<void> {
     title: q.title,
     description: q.description,
     points: q.points,
-    kind: q.kind,
     day_order: q.dayOrder ?? null,
     schedule_start_minute: q.scheduleStartMinute ?? null,
     schedule_duration_minutes: q.scheduleDurationMinutes ?? null,

@@ -1346,9 +1346,6 @@ function parseRepositionPreservingResult(
       throw new GoalPlannerError('Invalid quest row in reposition response', 'bad_response');
     }
     const input = inputQuests[i];
-    if (input.kind !== 'daily') {
-      throw new GoalPlannerError('Reposition input must be daily quests', 'bad_response');
-    }
     const aiTitle = pickQuestField(q, DAILY_QUEST_TITLE_KEYS);
     if (aiTitle && normalizeTitleKey(aiTitle) !== normalizeTitleKey(input.title)) {
       throw new GoalPlannerError(
@@ -1385,7 +1382,7 @@ export type RepositionDailyQuestsParams = {
   completedCheckpointCount: number;
   milestoneFrequency: MilestoneFrequency;
   checkpointTitles: string[];
-  /** Existing daily quests in display order; must all be kind "daily". */
+  /** Existing daily quests in display order. */
   quests: Quest[];
   reservedScheduleSlots: ReservedScheduleSlot[];
   todayIso: string;
@@ -1422,7 +1419,7 @@ export async function parseLifeBusySlotsFromMessage(params: {
 export async function repositionDailyQuestsPreservingQuests(
   params: RepositionDailyQuestsParams,
 ): Promise<PlannerDailyQuest[]> {
-  const dailies = params.quests.filter((q) => q.kind === 'daily');
+  const dailies = params.quests;
   const n = dailies.length;
   if (n === 0) return [];
   const dailyQuestCount = clampQuestCount(n);

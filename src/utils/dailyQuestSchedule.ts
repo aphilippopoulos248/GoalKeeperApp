@@ -98,7 +98,7 @@ export function collectOccupiedDailySlots(
   for (const g of goals) {
     if (g.completed) continue;
     if (excludeGoalId != null && g.id === excludeGoalId) continue;
-    const dailies = (g.dailyQuests ?? []).filter((q) => q.kind === 'daily');
+    const dailies = g.dailyQuests ?? [];
     const n = dailies.length;
     dailies.forEach((quest, i) => {
       const { startMinute, durationMinutes } = resolveQuestScheduleBlock(

@@ -2,6 +2,7 @@ import { supabase } from '../../lib/supabase';
 import type { Quest } from '../../types';
 
 import { ensurePublicProfileRow } from './ensurePublicProfile';
+import { isAccountTemplateQuestId } from './questProgressRepository';
 
 function formatLocalDate(d: Date): string {
   const y = d.getFullYear();
@@ -119,7 +120,7 @@ export async function applyQuestToggleToStats(
     nextPointsToday = pointsToday + quest.points;
     nextLifetime = row.lifetime_quest_points + quest.points;
 
-    if (quest.kind === 'daily') {
+    if (!isAccountTemplateQuestId(quest.id)) {
       const last = row.last_daily_activity_date;
       if (last !== today) {
         if (last === null) {

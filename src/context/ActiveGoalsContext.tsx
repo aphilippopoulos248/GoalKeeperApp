@@ -135,7 +135,7 @@ function mergeDailyQuestSchedule(
   });
   return fullQuests.map((q) => {
     const p = byId.get(q.id);
-    if (!p || q.kind !== 'daily') return q;
+    if (!p) return q;
     return {
       ...q,
       dayOrder: p.dayOrder,
@@ -170,7 +170,7 @@ function applyPlannedDailiesPreservingIds(
   });
   return fullQuests.map((q) => {
     const p = byId.get(q.id);
-    if (!p || q.kind !== 'daily') return q;
+    if (!p) return q;
     return {
       ...q,
       title: p.title,
@@ -194,7 +194,6 @@ function effectiveTargetDateIso(goal: Pick<Goal, 'targetDateIso'>): string {
 function enrichmentToDailyQuests(goalId: string, enrichment: GoalPlannerFullResult): Quest[] {
   return enrichment.dailyQuests.map((q, i) => ({
     id: `${goalId}-ai-dq-${i + 1}`,
-    kind: 'daily' as const,
     title: q.title,
     description: q.description,
     points: q.points,
@@ -419,9 +418,10 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
               goals,
               snapshot.id,
             ),
-            previousDailyQuests: (snapshot.dailyQuests ?? [])
-              .filter((q) => q.kind === 'daily')
-              .map((q) => ({ title: q.title, description: q.description })),
+            previousDailyQuests: (snapshot.dailyQuests ?? []).map((q) => ({
+              title: q.title,
+              description: q.description,
+            })),
             userProgressJournal: journalContextForAiRef.current.trim() || undefined,
           });
           if (userId) {
@@ -440,7 +440,6 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
                 ...goal,
                 dailyQuests: dailyQuestsRaw.map((q, i) => ({
                   id: `${goal.id}-ai-dq-${regenBatch}-${i + 1}`,
-                  kind: 'daily' as const,
                   title: q.title,
                   description: q.description,
                   points: q.points,
@@ -468,12 +467,10 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
         dailyQuests: g.dailyQuests?.map((q) => ({ ...q })),
       }));
       const ordered = working.filter(
-        (g) =>
-          !g.completed &&
-          (g.dailyQuests?.filter((q) => q.kind === 'daily').length ?? 0) > 0,
+        (g) => !g.completed && (g.dailyQuests?.length ?? 0) > 0,
       );
       for (const g of ordered) {
-        const dq = g.dailyQuests!.filter((q) => q.kind === 'daily');
+        const dq = g.dailyQuests!;
         const reserved = mergeLifeSlotsWithOccupiedGoals(lifeSlots, working, g.id);
         try {
           const planned = await repositionDailyQuestsPreservingQuests({
@@ -535,7 +532,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
           if (!dailies?.length) return g;
           let changed = false;
           const nextDailies = dailies.map((q) => {
-            if (q.id !== questId || q.kind !== 'daily') return q;
+            if (q.id !== questId) return q;
             changed = true;
             return {
               ...q,
@@ -604,15 +601,15 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
             working,
             goal.id,
           ),
-          previousDailyQuests: (goal.dailyQuests ?? [])
-            .filter((q) => q.kind === 'daily')
-            .map((q) => ({ title: q.title, description: q.description })),
+          previousDailyQuests: (goal.dailyQuests ?? []).map((q) => ({
+            title: q.title,
+            description: q.description,
+          })),
           userProgressJournal: journalContextForAiRef.current.trim() || undefined,
         });
         const regenBatch = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         const newDailies: Quest[] = dailyQuestsRaw.map((q, i) => ({
           id: `${goal.id}-ai-dq-${regenBatch}-${i + 1}`,
-          kind: 'daily' as const,
           title: q.title,
           description: q.description,
           points: q.points,
@@ -651,7 +648,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
     for (const goal of working) {
       if (goal.completed) continue;
       const questCount = dailyQuestCountForPriority(parseGoalPriority(goal.priority));
-      const dailies = (goal.dailyQuests ?? []).filter((q) => q.kind === 'daily');
+      const dailies = goal.dailyQuests ?? [];
       if (dailies.length < questCount) continue;
       const sortedDailies = sortDailiesByDayOrder(dailies);
       if (sortedDailies.length !== questCount) continue;
@@ -715,7 +712,7 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
       const goal = working.find((g) => g.id === goalId);
       if (!goal || goal.completed) return;
       const questCount = dailyQuestCountForPriority(parseGoalPriority(goal.priority));
-      const dailies = (goal.dailyQuests ?? []).filter((q) => q.kind === 'daily');
+      const dailies = goal.dailyQuests ?? [];
       if (dailies.length < questCount) return;
       const sortedDailies = sortDailiesByDayOrder(dailies);
       if (sortedDailies.length !== questCount) return;

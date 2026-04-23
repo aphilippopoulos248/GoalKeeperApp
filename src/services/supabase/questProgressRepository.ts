@@ -72,6 +72,11 @@ export function weeklyQuestId(userId: string, index1Based: number): string {
   return `weekly-${index1Based}-${userId}`;
 }
 
+/** Legacy account-level template quests (not attached to a goal). Streak/points rules treat these separately from per-goal dailies. */
+export function isAccountTemplateQuestId(id: string): boolean {
+  return id.startsWith('weekly-') || id.startsWith('wq-');
+}
+
 /** Map legacy mock ids to DB weekly ids after seeding. */
 export function remapLegacyWeeklyCompletionKeys(
   map: Record<string, boolean>,
@@ -96,7 +101,6 @@ export function mapQuestRowToQuest(row: {
   title: string;
   description: string;
   points: number;
-  kind: 'daily' | 'weekly';
   day_order: number | null;
   schedule_start_minute: number | null;
   schedule_duration_minutes: number | null;
@@ -106,7 +110,6 @@ export function mapQuestRowToQuest(row: {
     title: row.title,
     description: row.description,
     points: row.points,
-    kind: row.kind,
   };
   if (row.day_order != null) q.dayOrder = row.day_order;
   if (row.schedule_start_minute != null) q.scheduleStartMinute = row.schedule_start_minute;
