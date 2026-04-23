@@ -33,7 +33,6 @@ import {
   computeTrackLayout,
   getCurrentMilestoneToReachIndex,
   isCheckpointReachedByBarGeometry,
-  TRACK_LEFT,
 } from '../utils/milestoneProgressLayout';
 
 type Props = NativeStackScreenProps<GoalsStackParamList, 'GoalDetail'>;
@@ -71,7 +70,7 @@ export function GoalDetailScreen({ route, navigation }: Props) {
 
   const headX = useMemo(() => {
     if (!layout) return 0;
-    return computeBarHeadX(pointsFraction, TRACK_LEFT, layout.trackEndX);
+    return computeBarHeadX(pointsFraction, layout.trackStartX, layout.trackEndX);
   }, [layout, pointsFraction]);
 
   const currentMilestoneToReachIndex = useMemo(

@@ -29,36 +29,36 @@ export function visibleCheckpointIndices(
 }
 
 export type TrackLayout = {
-  firstDotX: number;
-  lastDotX: number;
-  xs: number[];
+  /** Left end of the baseline (same as progress 0%). */
+  trackStartX: number;
+  /** Right end of the baseline and center of the final milestone (progress 100%). */
   trackEndX: number;
+  xs: number[];
 };
 
-/** Horizontal positions of milestone dots for `n` checkpoints on a track of `trackWidth`. */
+/**
+ * Horizontal positions of milestone dots for `n` checkpoints on a track of `trackWidth`.
+ * Uses **n equal segments** from `trackStartX` to `trackEndX` (lead-in matches inter-dot spacing).
+ */
 export function computeTrackLayout(
   trackWidth: number,
   n: number,
 ): TrackLayout | null {
   if (trackWidth <= 0 || n < 1) return null;
   const rightPad = GOAL_R + 3;
-  const lastDotX = Math.max(TRACK_LEFT + GOAL_R + 4, trackWidth - rightPad);
-  const leadMin = Math.min(14, Math.max(10, trackWidth * 0.06));
-  const firstDotX = Math.max(
-    TRACK_LEFT + 8,
-    Math.min(lastDotX - 4, TRACK_LEFT + leadMin),
-  );
+  const trackEndX = Math.max(TRACK_LEFT + GOAL_R + 4, trackWidth - rightPad);
+  const trackStartX = TRACK_LEFT;
+  const span = trackEndX - trackStartX;
 
   const xs = Array.from({ length: n }, (_, i) => {
-    if (n <= 1) return lastDotX;
-    return firstDotX + (i / (n - 1)) * (lastDotX - firstDotX);
+    if (n <= 1) return trackEndX;
+    return trackStartX + ((i + 1) / n) * span;
   });
 
   return {
-    firstDotX,
-    lastDotX,
+    trackStartX,
+    trackEndX,
     xs,
-    trackEndX: lastDotX,
   };
 }
 
@@ -139,7 +139,7 @@ export function isMilestoneUnlockedByPoints(
   const layout = computeTrackLayout(REFERENCE_TRACK_WIDTH, totalCheckpoints);
   if (!layout) return false;
   const frac = computePointsBarFraction(earned, targetPoints);
-  const headX = computeBarHeadX(frac, TRACK_LEFT, layout.trackEndX);
+  const headX = computeBarHeadX(frac, layout.trackStartX, layout.trackEndX);
   return isCheckpointReachedByBarGeometry(checkpoint, checkpointIndex, layout, headX);
 }
 

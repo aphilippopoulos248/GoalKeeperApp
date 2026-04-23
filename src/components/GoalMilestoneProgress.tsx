@@ -79,7 +79,7 @@ export function GoalMilestoneProgress({
 
   const headX = useMemo(() => {
     if (!layout) return TRACK_LEFT;
-    return computeBarHeadX(pointsFraction, TRACK_LEFT, layout.trackEndX);
+    return computeBarHeadX(pointsFraction, layout.trackStartX, layout.trackEndX);
   }, [layout, pointsFraction]);
 
   if (total === 0) {
@@ -103,7 +103,7 @@ export function GoalMilestoneProgress({
         {layout && (
           <Svg width={trackWidth} height={ROW_HEIGHT}>
             <Line
-              x1={TRACK_LEFT}
+              x1={layout.trackStartX}
               y1={cy}
               x2={layout.trackEndX}
               y2={cy}
@@ -113,7 +113,7 @@ export function GoalMilestoneProgress({
 
             {pointsFraction > 0 && (
               <Line
-                x1={TRACK_LEFT}
+                x1={layout.trackStartX}
                 y1={cy}
                 x2={headX}
                 y2={cy}
