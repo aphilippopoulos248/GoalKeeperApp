@@ -7,6 +7,11 @@ type Deferred = { checkpointId: string; count: number };
 
 const deferByGoalId = new Map<string, Deferred>();
 
+/** While true, daily quest points must not advance this goal’s milestone bar (user declined the prompt). */
+export function isGoalBarFrozenAfterMilestoneNo(goalId: string): boolean {
+  return deferByGoalId.has(goalId);
+}
+
 /** Call when the user answers “No” on the milestone modal (queue head stays; prompt returns after N dailies). */
 export function deferMilestoneRepromptAfterNo(goalId: string, checkpointId: string) {
   deferByGoalId.set(goalId, { checkpointId, count: 0 });

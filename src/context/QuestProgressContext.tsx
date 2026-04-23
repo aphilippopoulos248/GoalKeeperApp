@@ -19,7 +19,10 @@ import { fetchWeeklyQuestsForUser } from '../services/supabase/weeklyQuestsRepos
 import type { Quest } from '../types';
 import { clearAttachedExercise } from '../lib/questAttachedExerciseStorage';
 import { clearAttachedRecipe } from '../lib/questAttachedRecipeStorage';
-import { onGoalAffiliatedDailyQuestCompleted } from '../navigation/milestoneDeferredReprompt';
+import {
+  isGoalBarFrozenAfterMilestoneNo,
+  onGoalAffiliatedDailyQuestCompleted,
+} from '../navigation/milestoneDeferredReprompt';
 import {
   enqueueMilestoneChecks,
   tryNavigateToFirstMilestoneInQueueAfterEnqueue,
@@ -165,7 +168,9 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
         setGoalBarEarned((prevEarned) => {
           const nextEarned = { ...prevEarned };
           const cur = nextEarned[entry.goalId] ?? 0;
-          const earned = Math.max(0, cur + delta);
+          const barBlocked =
+            delta > 0 && isGoalBarFrozenAfterMilestoneNo(entry.goalId);
+          const earned = Math.max(0, cur + (barBlocked ? 0 : delta));
           nextEarned[entry.goalId] = earned;
           if (userId) {
             queueMicrotask(() => void upsertGoalBarEarned(userId, entry.goalId, earned));
