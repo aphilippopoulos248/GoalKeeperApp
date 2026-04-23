@@ -265,7 +265,7 @@ function buildGoalFromInput(input: NewGoalInput, options?: AddGoalOptions): Goal
     targetDateIso,
     priority: input.priority,
     milestoneFrequency: input.milestoneFrequency,
-    goalType: input.goalType,
+    goalType: enrichment.goalType ?? input.goalType,
     ...critiqueSpread,
     completed: false,
     checkpoints: enrichmentToCheckpoints(id, enrichment),

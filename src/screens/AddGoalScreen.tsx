@@ -26,7 +26,7 @@ import {
   critiqueGoalAchievability,
   planNewGoal,
 } from '../services/openaiGoalPlanner';
-import type { GoalPriority, GoalType, MilestoneFrequency } from '../types';
+import type { GoalPriority, MilestoneFrequency } from '../types';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 import { measurementTargetAlreadySpecified } from '../utils/goalQuantificationHeuristics';
@@ -43,6 +43,7 @@ type Phase =
   | 'quantify'
   | 'deadline'
   | 'why'
+  | 'planning'
   | 'critique'
   | 'prefs';
 
@@ -129,7 +130,6 @@ export function AddGoalScreen({ navigation }: Props) {
   const [priority, setPriority] = useState<GoalPriority>('medium');
   const [milestoneFrequency, setMilestoneFrequency] =
     useState<MilestoneFrequency>('weekly');
-  const [goalType, setGoalType] = useState<GoalType>('linear');
 
   const [busy, setBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -155,10 +155,6 @@ export function AddGoalScreen({ navigation }: Props) {
         .join(' '),
     [shortTitle, specifics, quantityAnswer, whyHelpful, achievementDifficulty],
   );
-
-  useEffect(() => {
-    setGoalType(recommendedGoalTypeFromText(combinedGoalText));
-  }, [combinedGoalText]);
 
   const titleWordCount = useMemo(() => wordCount(shortTitle), [shortTitle]);
   const titleOk = titleWordCount > 0 && titleWordCount <= 5;
@@ -204,9 +200,12 @@ export function AddGoalScreen({ navigation }: Props) {
       case 'why':
         setPhase('deadline');
         break;
+      case 'planning':
+        setPhase('why');
+        break;
       case 'critique':
         setAchievabilityCritique('');
-        setPhase('why');
+        setPhase('planning');
         break;
       case 'prefs':
         setPhase('critique');
@@ -308,8 +307,12 @@ export function AddGoalScreen({ navigation }: Props) {
     setPhase('why');
   }, []);
 
-  const afterWhyContinue = useCallback(async () => {
+  const afterWhyContinue = useCallback(() => {
     if (!whyOk) return;
+    setPhase('planning');
+  }, [whyOk]);
+
+  const afterPlanningContinue = useCallback(async () => {
     setBusy(true);
     setPhase('critique');
     try {
@@ -330,13 +333,13 @@ export function AddGoalScreen({ navigation }: Props) {
           ? err.message
           : 'Something went wrong.';
       Alert.alert('Could not get critique', message, [
-        { text: 'Back', style: 'cancel', onPress: () => setPhase('why') },
+        { text: 'Back', style: 'cancel', onPress: () => setPhase('planning') },
         {
           text: 'Retry',
-          onPress: () => void afterWhyContinue(),
+          onPress: () => void afterPlanningContinue(),
         },
       ]);
-      setPhase('why');
+      setPhase('planning');
     } finally {
       setBusy(false);
     }
@@ -347,7 +350,6 @@ export function AddGoalScreen({ navigation }: Props) {
     specifics,
     targetDate,
     whyHelpful,
-    whyOk,
   ]);
 
   const afterCritiqueContinue = useCallback(() => {
@@ -397,7 +399,6 @@ export function AddGoalScreen({ navigation }: Props) {
     );
     setPriority('medium');
     setMilestoneFrequency('weekly');
-    setGoalType('biological');
     setPhase('prefs');
   }, []);
 
@@ -412,28 +413,30 @@ export function AddGoalScreen({ navigation }: Props) {
         targetDate,
         whyHelpful,
       });
+      const goalTypeHint = recommendedGoalTypeFromText(combinedGoalText);
+      const enrichment = await planNewGoal({
+        title: shortTitle.trim(),
+        description,
+        targetDateIso: targetDate.toISOString(),
+        todayIso: today.toISOString(),
+        completedCheckpointCount: 0,
+        dailyQuestCount: dailyQuestCountForPriority(priority),
+        milestoneFrequency,
+        goalType: goalTypeHint,
+        reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
+          lifeScheduleSlots,
+          goals.filter((g) => !g.completed),
+        ),
+      });
+      const resolvedGoalType = enrichment.goalType ?? goalTypeHint;
       const input = {
         title: shortTitle.trim(),
         description,
         targetDate,
         priority,
         milestoneFrequency,
-        goalType,
+        goalType: resolvedGoalType,
       };
-      const enrichment = await planNewGoal({
-        title: input.title,
-        description: input.description,
-        targetDateIso: input.targetDate.toISOString(),
-        todayIso: today.toISOString(),
-        completedCheckpointCount: 0,
-        dailyQuestCount: dailyQuestCountForPriority(priority),
-        milestoneFrequency,
-        goalType,
-        reservedScheduleSlots: mergeLifeSlotsWithOccupiedGoals(
-          lifeScheduleSlots,
-          goals.filter((g) => !g.completed),
-        ),
-      });
       const newGoal = addGoal(input, {
         enrichment,
         achievabilityCritique: achievabilityCritique.trim(),
@@ -486,7 +489,7 @@ export function AddGoalScreen({ navigation }: Props) {
     achievementDifficulty,
     achievabilityCritique,
     addGoal,
-    goalType,
+    combinedGoalText,
     goals,
     lifeScheduleSlots,
     milestoneFrequency,
@@ -830,6 +833,84 @@ export function AddGoalScreen({ navigation }: Props) {
                   { color: whyOk ? '#ffffff' : colors.textSecondary },
                 ]}
               >
+                Continue
+              </Text>
+            )}
+          </Pressable>
+        </>
+      );
+    }
+
+    if (phase === 'planning') {
+      return (
+        <>
+          {assistantLine(
+            'Choose priority and how often you want milestones. Then we will run an achievability review.',
+          )}
+          <Text style={[styles.label, { color: colors.textSecondary }]}>Priority</Text>
+          <View
+            style={[
+              styles.pickerWrapOuter,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Picker
+              selectedValue={priority}
+              onValueChange={(v) => setPriority(v as GoalPriority)}
+              style={[styles.picker, { color: colors.text }]}
+              mode={Platform.OS === 'android' ? 'dropdown' : undefined}
+              dropdownIconColor={colors.textSecondary}
+            >
+              <Picker.Item label="Low" value="low" color={colors.text} />
+              <Picker.Item label="Medium" value="medium" color={colors.text} />
+              <Picker.Item label="High" value="high" color={colors.text} />
+            </Picker>
+          </View>
+
+          <Text style={[styles.label, { color: colors.textSecondary }]}>
+            Milestone frequency
+          </Text>
+          <View
+            style={[
+              styles.pickerWrapOuter,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Picker
+              selectedValue={milestoneFrequency}
+              onValueChange={(v) => setMilestoneFrequency(v as MilestoneFrequency)}
+              style={[styles.picker, { color: colors.text }]}
+              mode={Platform.OS === 'android' ? 'dropdown' : undefined}
+              dropdownIconColor={colors.textSecondary}
+            >
+              <Picker.Item label="Weekly" value="weekly" color={colors.text} />
+              <Picker.Item label="Bi-Weekly" value="biweekly" color={colors.text} />
+              <Picker.Item label="Monthly" value="monthly" color={colors.text} />
+            </Picker>
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void afterPlanningContinue()}
+            disabled={busy}
+            style={({ pressed }) => [
+              styles.primaryBtn,
+              {
+                backgroundColor: !busy ? colors.primary : colors.border,
+              },
+              pressed && !busy && { opacity: 0.9 },
+            ]}
+          >
+            {busy ? (
+              <ActivityIndicator color="#ffffff" />
+            ) : (
+              <Text style={[styles.primaryBtnLabel, { color: '#ffffff' }]}>
                 Get AI critique
               </Text>
             )}
@@ -881,83 +962,8 @@ export function AddGoalScreen({ navigation }: Props) {
       return (
         <>
           {assistantLine(
-            'Choose priority, milestone spacing, and what kind of goal this is (this shapes AI milestones).',
+            'When you add this goal, we will classify it and shape milestones and daily quests to match.',
           )}
-          <Text style={[styles.label, { color: colors.textSecondary }]}>Priority</Text>
-          <View
-            style={[
-              styles.pickerWrapOuter,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Picker
-              selectedValue={priority}
-              onValueChange={(v) => setPriority(v as GoalPriority)}
-              style={[styles.picker, { color: colors.text }]}
-              mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-              dropdownIconColor={colors.textSecondary}
-            >
-              <Picker.Item label="Low" value="low" color={colors.text} />
-              <Picker.Item label="Medium" value="medium" color={colors.text} />
-              <Picker.Item label="High" value="high" color={colors.text} />
-            </Picker>
-          </View>
-
-          <Text style={[styles.label, { color: colors.textSecondary }]}>
-            Milestone frequency
-          </Text>
-          <View
-            style={[
-              styles.pickerWrapOuter,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Picker
-              selectedValue={milestoneFrequency}
-              onValueChange={(v) => setMilestoneFrequency(v as MilestoneFrequency)}
-              style={[styles.picker, { color: colors.text }]}
-              mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-              dropdownIconColor={colors.textSecondary}
-            >
-              <Picker.Item label="Weekly" value="weekly" color={colors.text} />
-              <Picker.Item label="Bi-Weekly" value="biweekly" color={colors.text} />
-              <Picker.Item label="Monthly" value="monthly" color={colors.text} />
-            </Picker>
-          </View>
-
-          <Text style={[styles.label, { color: colors.textSecondary }]}>Goal type</Text>
-          <View
-            style={[
-              styles.pickerWrapOuter,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Picker
-              selectedValue={goalType}
-              onValueChange={(v) => setGoalType(v as GoalType)}
-              style={[styles.picker, { color: colors.text }]}
-              mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-              dropdownIconColor={colors.textSecondary}
-            >
-              <Picker.Item label="Linear (predictable)" value="linear" color={colors.text} />
-              <Picker.Item
-                label="Biological (nonlinear)"
-                value="biological"
-                color={colors.text}
-              />
-              <Picker.Item label="Skill-based" value="skill_based" color={colors.text} />
-              <Picker.Item label="Outcome-based" value="outcome_based" color={colors.text} />
-            </Picker>
-          </View>
 
           <Pressable
             accessibilityRole="button"

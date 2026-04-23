@@ -21,6 +21,19 @@ export function parseGoalType(raw: unknown): GoalType {
   return 'linear';
 }
 
+/** Strict parse for model output; invalid or missing returns null (caller supplies fallback). */
+export function parseGoalTypeFromModel(raw: unknown): GoalType | null {
+  if (
+    raw === 'linear' ||
+    raw === 'biological' ||
+    raw === 'skill_based' ||
+    raw === 'outcome_based'
+  ) {
+    return raw;
+  }
+  return null;
+}
+
 export function normalizeQuest(raw: unknown): Quest | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
