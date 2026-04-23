@@ -256,12 +256,13 @@ export function RootStack() {
       }
 
       const gen = ++reconcileGenerationRef.current;
+      const isFreshSignIn = event === 'SIGNED_IN';
 
       void (async () => {
-        let kind: GreetingAccountKind;
+        let kind: GreetingAccountKind = 'returning';
         if (greetingKindCacheRef.current?.userId === user.id) {
           kind = greetingKindCacheRef.current.kind;
-        } else {
+        } else if (isFreshSignIn) {
           const consumed = await consumeGreetingIntent(user);
           kind = consumed ?? 'returning';
           greetingKindCacheRef.current = { userId: user.id, kind };
@@ -277,9 +278,12 @@ export function RootStack() {
         if (need === true) {
           setShowFirstTimeOnboarding(true);
           setShowGreeting(false);
-        } else {
+        } else if (isFreshSignIn) {
           setShowFirstTimeOnboarding(false);
           setShowGreeting(true);
+        } else {
+          setShowFirstTimeOnboarding(false);
+          setShowGreeting(false);
         }
       })();
     });
