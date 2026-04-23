@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { GoalMilestoneProgress } from '../components/GoalMilestoneProgress';
+import { GoalSmartPager } from '../components/GoalSmartPager';
 import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { useQuestProgress } from '../context/QuestProgressContext';
@@ -43,6 +44,7 @@ export function GoalDetailScreen({ route, navigation }: Props) {
   const { goalBarEarned } = useQuestProgress();
   const [trackWidth, setTrackWidth] = useState(0);
   const [revealBusyId, setRevealBusyId] = useState<string | null>(null);
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
   const g = getGoalById(route.params.goalId);
 
   useEffect(() => {
@@ -163,43 +165,37 @@ export function GoalDetailScreen({ route, navigation }: Props) {
       </Pressable>
 
       <Text style={[styles.title, { color: colors.text }]}>{g.title}</Text>
-      <Text style={[styles.body, { color: colors.textSecondary }]}>
-        {g.description}
-      </Text>
-
-      <View
-        style={[
-          styles.card,
-          { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
-        ]}
-      >
-        <Text style={[styles.cardTitle, { color: colors.text }]}>SMART</Text>
-        <SmartRow label="Specific" value={g.specific} />
-        <SmartRow label="Measurable" value={g.measurable} />
-        <SmartRow label="Achievable" value={g.achievable} />
-        <SmartRow label="Relevant" value={g.relevant} />
-        <SmartRow label="Time-bound" value={g.timeBound} />
-      </View>
-
-      {g.achievabilityCritique ? (
-        <View
-          style={[
-            styles.card,
+      <View style={styles.descriptionBlock}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: descriptionOpen }}
+          onPress={() => setDescriptionOpen((o) => !o)}
+          style={({ pressed }) => [
+            styles.descriptionToggle,
             {
               backgroundColor: colors.surfaceElevated,
               borderColor: colors.border,
-              marginBottom: spacing.md,
             },
+            pressed && { opacity: 0.92 },
           ]}
         >
-          <Text style={[styles.cardTitle, { color: colors.text }]}>
-            Achievability review
+          <Text style={[styles.descriptionToggleLabel, { color: colors.text }]}>
+            Description
           </Text>
-          <Text style={[styles.body, { color: colors.textSecondary }]}>
-            {g.achievabilityCritique}
+          <Ionicons
+            name={descriptionOpen ? 'chevron-up' : 'chevron-down'}
+            size={22}
+            color={colors.textSecondary}
+          />
+        </Pressable>
+        {descriptionOpen ? (
+          <Text style={[styles.descriptionBody, { color: colors.textSecondary }]}>
+            {g.description}
           </Text>
-        </View>
-      ) : null}
+        ) : null}
+      </View>
+
+      <GoalSmartPager goal={g} />
 
       <Text style={[styles.sectionTitle, { color: colors.text }]}>
         Milestones
@@ -665,16 +661,6 @@ export function GoalDetailScreen({ route, navigation }: Props) {
   );
 }
 
-function SmartRow({ label, value }: { label: string; value: string }) {
-  const { colors } = useAppTheme();
-  return (
-    <View style={styles.smartRow}>
-      <Text style={[styles.smartLabel, { color: colors.primary }]}>{label}</Text>
-      <Text style={[styles.smartValue, { color: colors.text }]}>{value}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   backRow: {
     flexDirection: 'row',
@@ -697,6 +683,27 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: spacing.lg,
   },
+  descriptionBlock: {
+    marginBottom: spacing.lg,
+  },
+  descriptionToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  descriptionToggleLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  descriptionBody: {
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: spacing.sm,
+  },
   card: {
     borderRadius: radius.lg,
     borderWidth: 1,
@@ -708,20 +715,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     marginBottom: spacing.xs,
-  },
-  smartRow: {
-    marginTop: spacing.xs,
-  },
-  smartLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  smartValue: {
-    fontSize: 14,
-    lineHeight: 20,
   },
   sectionTitle: {
     fontSize: 18,
