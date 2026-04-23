@@ -60,6 +60,14 @@ function startOfTomorrow(): Date {
   return d;
 }
 
+/** ~2 months from today at local noon, for sample debug goals */
+function twoMonthsFromNowNoon(): Date {
+  const d = new Date();
+  d.setDate(d.getDate() + 60);
+  d.setHours(12, 0, 0, 0);
+  return d;
+}
+
 function startOfDay(d: Date): Date {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -347,6 +355,52 @@ export function AddGoalScreen({ navigation }: Props) {
     setPhase('prefs');
   }, [achievabilityCritique]);
 
+  const fillDebugSampleGoal = useCallback(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': 'd523db',
+      },
+      body: JSON.stringify({
+        sessionId: 'd523db',
+        runId: 'debug-fill',
+        hypothesisId: 'H1',
+        location: 'AddGoalScreen.tsx:fillDebugSampleGoal',
+        message: 'Debug sample autofill started',
+        data: { targetPhase: 'prefs' },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    setPickerOpen(false);
+    setAndroidDeadlineStep(null);
+    setPendingDatePart(null);
+    setShortTitle('Get fit lose weight');
+    setSpecifics(
+      'I want to get in shape and lose extra weight in a healthy, sustainable way over the next two months, with better meals and regular movement.',
+    );
+    setAchievementDifficulty(
+      'I snack when stressed, and my work schedule makes it hard to keep workouts consistent every week.',
+    );
+    setQuantifyQuestion(DEFAULT_MEASUREMENT_QUESTION);
+    setQuantityAnswer(
+      'Lose about 8–12 pounds over 8 weeks, track weight weekly, and add 3 cardio sessions and 2 strength sessions per week.',
+    );
+    setTargetDate(twoMonthsFromNowNoon());
+    setWhyHelpful(
+      'I want more energy, better sleep, and confidence; losing weight is part of feeling healthier day to day.',
+    );
+    setAchievabilityCritique(
+      'Two months is enough time for visible progress if you keep a modest calorie deficit and stay consistent with activity. Re-check progress weekly and adjust if loss stalls or feels too fast.',
+    );
+    setPriority('medium');
+    setMilestoneFrequency('weekly');
+    setGoalType('biological');
+    setPhase('prefs');
+  }, []);
+
   const createGoal = useCallback(async () => {
     setSubmitting(true);
     try {
@@ -386,6 +440,30 @@ export function AddGoalScreen({ navigation }: Props) {
       });
       navigation.popToTop();
     } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd523db' },
+        body: JSON.stringify({
+          sessionId: 'd523db',
+          runId: 'create-goal',
+          hypothesisId: 'H-ui',
+          location: 'AddGoalScreen.tsx:createGoal',
+          message: 'createGoal error',
+          data: {
+            isGpe: err instanceof GoalPlannerError,
+            code: err instanceof GoalPlannerError ? err.code : null,
+            msg:
+              err instanceof GoalPlannerError
+                ? err.message
+                : err instanceof Error
+                  ? err.name
+                  : 'unknown',
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       const message =
         err instanceof GoalPlannerError
           ? err.message
@@ -924,6 +1002,23 @@ export function AddGoalScreen({ navigation }: Props) {
 
         <Text style={[styles.heading, { color: colors.text }]}>New goal</Text>
 
+        {__DEV__ ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Debug fill sample goal"
+            onPress={fillDebugSampleGoal}
+            style={({ pressed }) => [
+              styles.debugFillBtn,
+              { borderColor: colors.border, backgroundColor: colors.surfaceElevated },
+              pressed && { opacity: 0.9 },
+            ]}
+          >
+            <Text style={[styles.debugFillBtnLabel, { color: colors.textSecondary }]}>
+              Debug: fill sample (get in shape, lose weight, ~2 months)
+            </Text>
+          </Pressable>
+        ) : null}
+
         {renderBody()}
       </ScrollView>
     </Screen>
@@ -949,6 +1044,19 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     marginBottom: spacing.lg,
+  },
+  debugFillBtn: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginTop: -spacing.md,
+    marginBottom: spacing.lg,
+  },
+  debugFillBtnLabel: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   assistant: {
     fontSize: 16,

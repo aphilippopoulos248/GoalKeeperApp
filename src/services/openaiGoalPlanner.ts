@@ -1004,6 +1004,51 @@ function clampPlanMilestoneLabel(trimmed: string): string {
   return `${trimmed.slice(0, MILESTONE_PLAN_LABEL_MAX).trim()}…`;
 }
 
+const DEBUG_LOG_ENDPOINT =
+  'http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a' as const;
+
+/**
+ * LLMs often mis-key the array. Prefer `dailyQuests`, then common aliases.
+ * For full-plan JSON, `quests` is accepted only when elements look like quest rows
+ * (avoids conflating with unrelated keys).
+ */
+function extractModelDailyQuestsArray(
+  data: Record<string, unknown>,
+  mode: 'full' | 'dailyOnly',
+): unknown[] | null {
+  const fromDaily = data.dailyQuests;
+  if (Array.isArray(fromDaily)) return fromDaily;
+  for (const k of ['DailyQuests', 'daily_quests'] as const) {
+    const v = data[k];
+    if (Array.isArray(v)) return v;
+  }
+  if (Array.isArray(data.quests) && data.quests.length > 0) {
+    const first = data.quests[0];
+    if (isRecord(first)) {
+      const hasQuestShape =
+        pickQuestField(first, DAILY_QUEST_TITLE_KEYS) !== undefined ||
+        pickQuestField(first, DAILY_QUEST_DESC_KEYS) !== undefined ||
+        typeof first.startMinute === 'number' ||
+        typeof first.dayOrder === 'number';
+      if (hasQuestShape) {
+        if (mode === 'dailyOnly') return data.quests;
+        if (mode === 'full' && (data as Record<string, unknown>).dailyQuests == null) {
+          return data.quests;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function isDailyQuestFullPlanParseFailureMessage(message: string): boolean {
+  if (message === 'Invalid dailyQuests') return true;
+  if (message.startsWith('Expected at least ') && message.includes('daily quest')) {
+    return true;
+  }
+  return false;
+}
+
 function parseFullResult(
   data: unknown,
   dailyQuestCount: number,
@@ -1083,13 +1128,32 @@ function parseFullResult(
     };
   }
 
-  if (!Array.isArray(data.dailyQuests)) {
+  const modelDailyList = extractModelDailyQuestsArray(data, 'full');
+  if (modelDailyList == null) {
+    // #region agent log
+    fetch(DEBUG_LOG_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd523db' },
+      body: JSON.stringify({
+        sessionId: 'd523db',
+        runId: 'create-goal',
+        hypothesisId: 'H1',
+        location: 'openaiGoalPlanner.ts:parseFullResult',
+        message: 'No extractable dailyQuests array',
+        data: {
+          topKeys: Object.keys(data).slice(0, 20),
+          dqType: typeof data.dailyQuests,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     throw new GoalPlannerError('Invalid dailyQuests', 'bad_response');
   }
 
   const dailyQuests: DailyQuestParseRow[] = [];
   let dqIndex = 0;
-  for (const q of data.dailyQuests) {
+  for (const q of modelDailyList) {
     if (!isRecord(q)) {
       continue;
     }
@@ -1125,6 +1189,21 @@ function parseFullResult(
   }
 
   if (dailyQuests.length < n) {
+    // #region agent log
+    fetch(DEBUG_LOG_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd523db' },
+      body: JSON.stringify({
+        sessionId: 'd523db',
+        runId: 'create-goal',
+        hypothesisId: 'H3',
+        location: 'openaiGoalPlanner.ts:parseFullResult',
+        message: 'Too few valid daily quest rows after parsing',
+        data: { expected: n, parsed: dailyQuests.length, modelListLen: modelDailyList.length },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     throw new GoalPlannerError(
       `Expected at least ${n} daily quests`,
       'bad_response',
@@ -1135,6 +1214,22 @@ function parseFullResult(
     normalizeDailyQuestDayOrders(dailyQuests.slice(0, n)),
     reservedScheduleSlots,
   );
+
+  // #region agent log
+  fetch(DEBUG_LOG_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd523db' },
+    body: JSON.stringify({
+      sessionId: 'd523db',
+      runId: 'create-goal',
+      hypothesisId: 'H-ok',
+      location: 'openaiGoalPlanner.ts:parseFullResult',
+      message: 'parseFullResult dailyQuests success',
+      data: { n, normalized: normalizedDaily.length },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
 
   return {
     specific: (data.specific as string).trim(),
@@ -1153,12 +1248,16 @@ function parseDailyOnly(
   reservedScheduleSlots?: ReservedScheduleSlot[],
 ): GoalPlannerFullResult['dailyQuests'] {
   const n = clampQuestCount(dailyQuestCount);
-  if (!isRecord(data) || !Array.isArray(data.dailyQuests)) {
+  if (!isRecord(data)) {
+    throw new GoalPlannerError('Invalid dailyQuests-only response', 'bad_response');
+  }
+  const onlyList = extractModelDailyQuestsArray(data, 'dailyOnly');
+  if (onlyList == null) {
     throw new GoalPlannerError('Invalid dailyQuests-only response', 'bad_response');
   }
   const out: DailyQuestParseRow[] = [];
   let dqIndex = 0;
-  for (const q of data.dailyQuests) {
+  for (const q of onlyList) {
     if (!isRecord(q)) continue;
     let title = pickQuestField(q, DAILY_QUEST_TITLE_KEYS);
     let description = pickQuestField(q, DAILY_QUEST_DESC_KEYS);
@@ -1461,7 +1560,10 @@ export async function planNewGoal(
     ...(jsearchContext ? { jsearchContext } : {}),
   });
 
-  const runOnce = async (isRetry: boolean): Promise<GoalPlannerFullResult> => {
+  const runOnce = async (opts: {
+    checkpointFixRetry: boolean;
+    dailyQuestsFixRetry: boolean;
+  }): Promise<GoalPlannerFullResult> => {
     let system = appendPlannerExternalContext(
       buildFullSystem(
         dailyQuestCount,
@@ -1472,11 +1574,17 @@ export async function planNewGoal(
       spoonacularContext,
       jsearchContext,
     );
-    if (isRetry) {
+    if (opts.checkpointFixRetry) {
       system += `
 
 RETRY — Your previous reply failed validation. checkpoints must contain exactly ${checkpointPlan.expectedCheckpointCount} items; each checkpoints[i].weekOffset must equal expectedWeekOffsets[i] in order: [${checkpointPlan.expectedWeekOffsets.join(', ')}]; and each checkpoints[i].label must be a non-empty string (user-visible milestone name, under 160 characters). Reply with a single valid JSON object; follow all other rules unchanged.`;
     }
+    if (opts.dailyQuestsFixRetry) {
+      system += `
+
+RETRY — Your previous JSON failed the **dailyQuests** rules. The top-level key must be exactly "dailyQuests" (a JSON array of exactly ${dailyQuestCount} items). Each item must include non-empty "title" and "description", "points" in {10,15,20,25}, "dayOrder" 0-999, "startMinute" 0-1439, "durationMinutes" 15-120, and non-overlapping [startMinute, startMinute+duration) blocks that do not cross reservedScheduleSlots. Reply with one complete valid JSON object.`;
+    }
+    const isRetry = opts.checkpointFixRetry || opts.dailyQuestsFixRetry;
     const data = await postChatJson(system, user, {
       temperature: isRetry ? 0.35 : undefined,
     });
@@ -1489,10 +1597,17 @@ RETRY — Your previous reply failed validation. checkpoints must contain exactl
   };
 
   try {
-    return await runOnce(false);
+    return await runOnce({ checkpointFixRetry: false, dailyQuestsFixRetry: false });
   } catch (e) {
     if (e instanceof GoalPlannerError && e.code === 'checkpoint_mismatch') {
-      return await runOnce(true);
+      return await runOnce({ checkpointFixRetry: true, dailyQuestsFixRetry: false });
+    }
+    if (
+      e instanceof GoalPlannerError &&
+      e.code === 'bad_response' &&
+      isDailyQuestFullPlanParseFailureMessage(e.message)
+    ) {
+      return await runOnce({ checkpointFixRetry: false, dailyQuestsFixRetry: true });
     }
     throw e;
   }
