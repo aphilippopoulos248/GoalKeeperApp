@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,6 +14,13 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import {
+  buildDiceBearPngUrl,
+  DICEBEAR_STYLE_OPTIONS,
+  DEFAULT_DICEBEAR_STYLE,
+  randomDiceBearSeed,
+  type DiceBearStyleId,
+} from '../lib/dicebearUrl';
 import { useAuthUser } from '../context/AuthUserContext';
 import { rootNavigationRef } from '../navigation/rootNavigationRef';
 import { updateProfileOnboarding } from '../services/supabase/profileRepository';
@@ -35,6 +43,7 @@ type Phase =
   | 'welcome_type'
   | 'name_input'
   | 'background_input'
+  | 'avatar_customize'
   | 'closing_type';
 
 type Props = {
@@ -52,13 +61,20 @@ export function FirstTimeOnboardingOverlay({ visible, onFinished }: Props) {
   const [closingShown, setClosingShown] = useState('');
   const [nameDraft, setNameDraft] = useState('');
   const [backgroundDraft, setBackgroundDraft] = useState('');
+  const [avatarSeed, setAvatarSeed] = useState('');
+  const [avatarStyle, setAvatarStyle] =
+    useState<DiceBearStyleId>(DEFAULT_DICEBEAR_STYLE);
   const [nameError, setNameError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const nameDraftRef = useRef(nameDraft);
   const backgroundDraftRef = useRef(backgroundDraft);
+  const avatarStyleRef = useRef(avatarStyle);
+  const avatarSeedRef = useRef(avatarSeed);
   nameDraftRef.current = nameDraft;
   backgroundDraftRef.current = backgroundDraft;
+  avatarStyleRef.current = avatarStyle;
+  avatarSeedRef.current = avatarSeed;
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
 
@@ -68,9 +84,14 @@ export function FirstTimeOnboardingOverlay({ visible, onFinished }: Props) {
     setSaveError(null);
     const bg =
       backgroundDraftRef.current.trim() === '' ? null : backgroundDraftRef.current.trim();
+    const avatar_url = buildDiceBearPngUrl({
+      style: avatarStyleRef.current,
+      seed: avatarSeedRef.current,
+    });
     const { error } = await updateProfileOnboarding(userId, {
       name: nameDraftRef.current,
       background: bg,
+      avatar_url,
     });
     setSaving(false);
     if (error) {
@@ -103,6 +124,8 @@ export function FirstTimeOnboardingOverlay({ visible, onFinished }: Props) {
       setClosingShown('');
       setNameDraft('');
       setBackgroundDraft('');
+      setAvatarSeed('');
+      setAvatarStyle(DEFAULT_DICEBEAR_STYLE);
       setNameError(null);
       setSaveError(null);
       setSaving(false);
@@ -225,8 +248,24 @@ export function FirstTimeOnboardingOverlay({ visible, onFinished }: Props) {
   };
 
   const onContinueBackground = () => {
+    setAvatarSeed(randomDiceBearSeed());
+    setAvatarStyle(DEFAULT_DICEBEAR_STYLE);
+    setPhase('avatar_customize');
+  };
+
+  const onContinueAvatar = () => {
     setPhase('closing_type');
   };
+
+  const onRandomizeAvatar = () => {
+    setAvatarSeed(randomDiceBearSeed());
+  };
+
+  const avatarPreviewUri = buildDiceBearPngUrl({
+    style: avatarStyle,
+    seed: avatarSeed || 'goalkeeper',
+    size: 220,
+  });
 
   if (!visible) {
     return null;
@@ -356,6 +395,106 @@ export function FirstTimeOnboardingOverlay({ visible, onFinished }: Props) {
               </View>
             ) : null}
 
+            {phase === 'avatar_customize' ? (
+              <View style={styles.formBlock}>
+                <Text style={headingStyle}>Let&apos;s set your look</Text>
+                <Text
+                  style={[
+                    styles.avatarHint,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Pick a style and tap randomize until it feels like you.
+                </Text>
+                <View
+                  style={[
+                    styles.avatarPreviewRing,
+                    { borderColor: colors.border, backgroundColor: colors.surface },
+                  ]}
+                >
+                  <Image
+                    source={{ uri: avatarPreviewUri }}
+                    style={styles.avatarPreviewImage}
+                    accessibilityLabel="Avatar preview"
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.subheading,
+                    { color: colors.textSecondary, marginTop: spacing.md },
+                  ]}
+                >
+                  Style
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.styleChipsRow}
+                >
+                  {DICEBEAR_STYLE_OPTIONS.map((opt) => {
+                    const selected = avatarStyle === opt.id;
+                    return (
+                      <Pressable
+                        key={opt.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Avatar style ${opt.label}`}
+                        accessibilityState={{ selected }}
+                        onPress={() => setAvatarStyle(opt.id)}
+                        style={({ pressed }) => [
+                          styles.styleChip,
+                          {
+                            borderColor: selected ? colors.primary : colors.border,
+                            backgroundColor: selected
+                              ? colors.primaryMuted
+                              : colors.surfaceElevated,
+                          },
+                          pressed && { opacity: 0.9 },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.styleChipLabel,
+                            { color: selected ? colors.primary : colors.text },
+                          ]}
+                        >
+                          {opt.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Randomize avatar"
+                  onPress={onRandomizeAvatar}
+                  style={({ pressed }) => [
+                    styles.secondaryButton,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: colors.surfaceElevated,
+                    },
+                    pressed && { opacity: 0.9 },
+                  ]}
+                >
+                  <Text style={[styles.secondaryButtonLabel, { color: colors.text }]}>
+                    Randomize
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Continue"
+                  onPress={onContinueAvatar}
+                  style={({ pressed }) => [
+                    styles.primaryButton,
+                    { backgroundColor: colors.primary },
+                    pressed && { opacity: 0.9 },
+                  ]}
+                >
+                  <Text style={styles.primaryButtonLabel}>Continue</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
             {phase === 'closing_type' ? (
               <View style={styles.closingBlock}>
                 {saveError ? (
@@ -466,5 +605,62 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
     color: '#fff',
+  },
+  avatarHint: {
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+  subheading: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.sm,
+  },
+  avatarPreviewRing: {
+    alignSelf: 'center',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    borderWidth: 2,
+    padding: 6,
+    marginBottom: spacing.md,
+  },
+  avatarPreviewImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 9999,
+  },
+  styleChipsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: 4,
+    marginBottom: spacing.md,
+  },
+  styleChip: {
+    borderWidth: 2,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  styleChipLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  secondaryButton: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  secondaryButtonLabel: {
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

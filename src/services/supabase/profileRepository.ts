@@ -4,6 +4,7 @@ import { ensurePublicProfileRow } from './ensurePublicProfile';
 export type ProfileOnboardingFields = {
   name: string | null;
   background: string | null;
+  avatar_url: string | null;
 };
 
 export async function fetchProfileOnboardingFields(
@@ -11,7 +12,7 @@ export async function fetchProfileOnboardingFields(
 ): Promise<ProfileOnboardingFields | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('name, background')
+    .select('name, background, avatar_url')
     .eq('id', userId)
     .maybeSingle();
 
@@ -25,6 +26,7 @@ export async function fetchProfileOnboardingFields(
   return {
     name: data.name,
     background: data.background,
+    avatar_url: data.avatar_url,
   };
 }
 
@@ -45,7 +47,7 @@ export async function profileNeedsOnboarding(userId: string): Promise<boolean | 
 
 export async function updateProfileOnboarding(
   userId: string,
-  params: { name: string; background: string | null },
+  params: { name: string; background: string | null; avatar_url: string },
 ): Promise<{ error: string | null }> {
   const trimmedName = params.name.trim();
   if (!trimmedName) {
@@ -56,12 +58,21 @@ export async function updateProfileOnboarding(
       ? null
       : params.background.trim();
 
+  const avatarUrl = params.avatar_url.trim();
+  if (!avatarUrl) {
+    return { error: 'Avatar is required.' };
+  }
+  if (!avatarUrl.startsWith('https://api.dicebear.com/')) {
+    return { error: 'Invalid avatar URL.' };
+  }
+
   const { error } = await supabase
     .from('profiles')
     .update({
       name: trimmedName,
       background,
       display_name: trimmedName,
+      avatar_url: avatarUrl,
     })
     .eq('id', userId);
 

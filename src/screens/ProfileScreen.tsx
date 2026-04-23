@@ -3,6 +3,7 @@ import type { User } from '@supabase/supabase-js';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -39,6 +40,7 @@ export function ProfileScreen({ navigation }: Props) {
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [profileEmail, setProfileEmail] = useState<string | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [avatarImageError, setAvatarImageError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +86,12 @@ export function ProfileScreen({ navigation }: Props) {
       ? displayNameFromUser(authUser)
       : null;
   const profileBackground = profileFromDb?.background?.trim() ?? '';
+  const profileAvatarUrl = profileFromDb?.avatar_url?.trim() ?? '';
+  const showProfileAvatar = profileAvatarUrl.length > 0 && !avatarImageError;
+
+  useEffect(() => {
+    setAvatarImageError(false);
+  }, [profileAvatarUrl]);
 
   const onLogOut = async () => {
     setLogoutError(null);
@@ -121,7 +129,16 @@ export function ProfileScreen({ navigation }: Props) {
               },
             ]}
           />
-          <BronzeRankIcon size={200} />
+          {showProfileAvatar ? (
+            <Image
+              source={{ uri: profileAvatarUrl }}
+              style={styles.profileAvatar}
+              onError={() => setAvatarImageError(true)}
+              accessibilityLabel="Profile avatar"
+            />
+          ) : (
+            <BronzeRankIcon size={200} />
+          )}
         </View>
 
         {profileLoading ? (
@@ -272,6 +289,11 @@ const styles = StyleSheet.create({
     width: 160,
     height: 160,
     borderRadius: 80,
+  },
+  profileAvatar: {
+    width: 200,
+    height: 200,
+    borderRadius: 100,
   },
   profileNameLoader: {
     marginBottom: spacing.xs,
