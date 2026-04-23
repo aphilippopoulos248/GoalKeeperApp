@@ -67,7 +67,7 @@ type ActiveGoalsContextValue = {
   goals: Goal[];
   /** True after the first load from Supabase (or signed-out demo state is ready). */
   goalsStorageReady: boolean;
-  addGoal: (input: NewGoalInput, options?: AddGoalOptions) => void;
+  addGoal: (input: NewGoalInput, options?: AddGoalOptions) => Goal;
   getGoalById: (id: string) => Goal | undefined;
   removeGoal: (goalId: string) => void;
   toggleCheckpoint: (goalId: string, checkpointId: string) => void;
@@ -501,7 +501,9 @@ export function ActiveGoalsProvider({ children }: { children: React.ReactNode })
   );
 
   const addGoal = useCallback((input: NewGoalInput, options?: AddGoalOptions) => {
-    setGoals((prev) => [buildGoalFromInput(input, options), ...prev]);
+    const newGoal = buildGoalFromInput(input, options);
+    setGoals((prev) => [newGoal, ...prev]);
+    return newGoal;
   }, []);
 
   const getGoalById = useCallback(

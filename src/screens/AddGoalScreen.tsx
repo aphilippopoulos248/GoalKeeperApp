@@ -434,80 +434,15 @@ export function AddGoalScreen({ navigation }: Props) {
           goals.filter((g) => !g.completed),
         ),
       });
-      addGoal(input, {
+      const newGoal = addGoal(input, {
         enrichment,
         achievabilityCritique: achievabilityCritique.trim(),
       });
-      let goalsStackIndex = 0;
-      let goalsRouteNames: string[] = [];
-      // #region agent log
-      try {
-        const navState = navigation.getState();
-        const routes = navState?.routes ?? [];
-        goalsStackIndex = navState?.index ?? 0;
-        goalsRouteNames = routes.map((r: { name: string }) => r.name);
-        const parent = navigation.getParent?.();
-        const pState = parent?.getState?.();
-        const pParent = parent?.getParent?.();
-        const ppState = pParent?.getState?.();
-        const navigationAction =
-          goalsStackIndex > 0 ? 'popToTop' : 'reset(GoalList)';
-        const payload = {
-          sessionId: 'e8a9e4',
-          runId: 'post-fix',
-          hypothesisId: 'H1-H5',
-          location: 'AddGoalScreen.tsx:createGoal',
-          message: 'goal created: navigation branch',
-          data: {
-            stackType: navState?.type,
-            routeNames: goalsRouteNames,
-            index: goalsStackIndex,
-            navigationAction,
-            parentType: pState?.type,
-            parentRouteNames: pState?.routes?.map((r: { name?: string }) => r.name),
-            parentIndex: pState?.index,
-            ppType: ppState?.type,
-          },
-          timestamp: Date.now(),
-        };
-        if (__DEV__) {
-          console.warn('[debug-e8a9e4]', JSON.stringify(payload));
-        }
-        fetch('http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Debug-Session-Id': 'e8a9e4',
-          },
-          body: JSON.stringify(payload),
-        }).catch(() => {});
-      } catch (e) {
-        fetch('http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Debug-Session-Id': 'e8a9e4',
-          },
-          body: JSON.stringify({
-            sessionId: 'e8a9e4',
-            runId: 'post-fix',
-            hypothesisId: 'H-catch',
-            location: 'AddGoalScreen.tsx:createGoal',
-            message: 'nav state introspection failed',
-            data: { err: String(e) },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-      }
-      // #endregion
-      if (goalsStackIndex > 0) {
-        navigation.popToTop();
-      } else {
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'GoalList' }],
-        });
-      }
+      navigation.replace('NewGoalReveal', {
+        goalId: newGoal.id,
+        milestoneTitles: newGoal.checkpoints.map((c) => c.title),
+        goalTitle: newGoal.title,
+      });
     } catch (err) {
       // #region agent log
       fetch('http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a', {
