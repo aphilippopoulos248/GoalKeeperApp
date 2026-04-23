@@ -15,6 +15,9 @@ import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 import { stripTimeBoundDisplay } from '../utils/smartDisplay';
 
+/** Fixed height keeps every pager page visually aligned regardless of copy length. */
+const SMART_CARD_HEIGHT = 400;
+
 const PAGES = [
   { letter: 'S', label: 'Specific', accent: '#3b82f6', icon: 'locate' as const },
   { letter: 'M', label: 'Measurable', accent: '#22c55e', icon: 'stats-chart' as const },
@@ -78,16 +81,34 @@ export function GoalSmartPager({ goal }: Props) {
                 {
                   backgroundColor: colors.surfaceElevated,
                   borderColor: meta.accent,
+                  height: SMART_CARD_HEIGHT,
                 },
               ]}
             >
-              <Text style={[styles.bigLetter, { color: meta.accent }]}>{meta.letter}</Text>
-              <Text style={[styles.label, { color: meta.accent }]}>{meta.label}</Text>
-              <View style={[styles.divider, { backgroundColor: meta.accent }]} />
-              <View style={[styles.iconRing, { borderColor: meta.accent }]}>
-                <Ionicons name={meta.icon} size={28} color={meta.accent} />
+              <View style={styles.letterBlock}>
+                <Text style={[styles.bigLetter, { color: meta.accent }]}>{meta.letter}</Text>
+                <Text style={[styles.label, { color: meta.accent }]}>{meta.label}</Text>
+                <View style={[styles.divider, { backgroundColor: meta.accent }]} />
               </View>
-              <Text style={[styles.body, { color: colors.text }]}>{bodies[i]}</Text>
+              <View style={styles.iconSection}>
+                <View
+                  style={[
+                    styles.iconRing,
+                    { borderColor: meta.accent, backgroundColor: `${meta.accent}22` },
+                  ]}
+                >
+                  <Ionicons name={meta.icon} size={32} color={meta.accent} />
+                </View>
+              </View>
+              <ScrollView
+                style={styles.bodyScroll}
+                contentContainerStyle={styles.bodyScrollContent}
+                showsVerticalScrollIndicator
+                nestedScrollEnabled
+                bounces={false}
+              >
+                <Text style={[styles.body, { color: colors.text }]}>{bodies[i]}</Text>
+              </ScrollView>
             </View>
           </View>
         ))}
@@ -128,36 +149,55 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   card: {
+    width: '100%',
     borderRadius: radius.lg,
     borderWidth: 1,
     padding: spacing.lg,
-    minHeight: 280,
+    paddingBottom: spacing.md,
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  letterBlock: {
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: spacing.xl,
   },
   bigLetter: {
-    fontSize: 48,
+    fontSize: 88,
+    lineHeight: 96,
     fontWeight: '800',
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
   },
   label: {
     fontSize: 16,
     fontWeight: '700',
-    marginBottom: spacing.sm,
-  },
-  divider: {
-    width: 40,
-    height: 2,
-    borderRadius: 1,
     marginBottom: spacing.md,
   },
+  divider: {
+    width: 44,
+    height: 2,
+    borderRadius: 1,
+  },
+  iconSection: {
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: spacing.xl,
+  },
   iconRing: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.md,
+  },
+  bodyScroll: {
+    flex: 1,
+    width: '100%',
+    minHeight: 0,
+  },
+  bodyScrollContent: {
+    paddingBottom: spacing.xs,
   },
   body: {
     fontSize: 15,
