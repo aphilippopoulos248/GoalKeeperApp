@@ -12,6 +12,7 @@ import { ActiveGoalsProvider } from './src/context/ActiveGoalsContext';
 import { AuthUserProvider } from './src/context/AuthUserContext';
 import { QuestProgressProvider } from './src/context/QuestProgressContext';
 import { initProgressReflectionNotificationHandler } from './src/lib/progressReflectionNotifications';
+import { rootNavigationRef } from './src/navigation/rootNavigationRef';
 import { RootStack } from './src/navigation/RootStack';
 import { ThemeProvider, useAppTheme } from './src/theme/ThemeProvider';
 
@@ -36,7 +37,7 @@ function AppNavigation() {
   };
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer ref={rootNavigationRef} theme={navTheme}>
       <RootStack />
     </NavigationContainer>
   );

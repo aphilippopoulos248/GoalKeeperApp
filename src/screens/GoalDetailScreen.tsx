@@ -1,12 +1,24 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { GoalMilestoneProgress } from '../components/GoalMilestoneProgress';
 import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
 import { useQuestProgress } from '../context/QuestProgressContext';
+import {
+  navigateToNextMilestoneInQueue,
+  shiftMilestoneCheck,
+} from '../navigation/milestoneCheckQueue';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
@@ -61,6 +73,55 @@ export function GoalDetailScreen({ route, navigation }: Props) {
   const currentMilestoneToReachIndex = useMemo(
     () => getCurrentMilestoneToReachIndex(g?.checkpoints ?? [], layout, headX),
     [g, layout, headX],
+  );
+
+  const milestoneCheck = route.params.milestoneCheck;
+  const checkCp =
+    g && milestoneCheck
+      ? g.checkpoints.find((c) => c.id === milestoneCheck.checkpointId)
+      : undefined;
+  const showMilestoneCheckModal = !!milestoneCheck && !!checkCp;
+
+  useEffect(() => {
+    if (milestoneCheck && g && !g.checkpoints.some((c) => c.id === milestoneCheck.checkpointId)) {
+      shiftMilestoneCheck();
+      navigation.setParams({ milestoneCheck: undefined });
+      navigateToNextMilestoneInQueue();
+    }
+  }, [g, milestoneCheck, navigation]);
+
+  useEffect(() => {
+    if (milestoneCheck && !g) {
+      shiftMilestoneCheck();
+      navigation.setParams({ milestoneCheck: undefined });
+      navigateToNextMilestoneInQueue();
+    }
+  }, [g, milestoneCheck, navigation]);
+
+  const onResolveMilestone = useCallback(
+    (sayYes: boolean) => {
+      if (!g || !milestoneCheck || !checkCp) {
+        if (milestoneCheck) {
+          shiftMilestoneCheck();
+          navigation.setParams({ milestoneCheck: undefined });
+          navigateToNextMilestoneInQueue();
+        }
+        return;
+      }
+      if (checkCp.revealed !== false) {
+        if (sayYes) {
+          if (!checkCp.done) {
+            toggleCheckpoint(g.id, checkCp.id);
+          }
+        } else if (checkCp.done) {
+          toggleCheckpoint(g.id, checkCp.id);
+        }
+      }
+      shiftMilestoneCheck();
+      navigation.setParams({ milestoneCheck: undefined });
+      navigateToNextMilestoneInQueue();
+    },
+    [g, milestoneCheck, checkCp, navigation, toggleCheckpoint],
   );
 
   if (!g) {
@@ -356,6 +417,90 @@ export function GoalDetailScreen({ route, navigation }: Props) {
       >
         <Text style={styles.removeButtonLabel}>Remove goal</Text>
       </Pressable>
+
+      <Modal
+        visible={showMilestoneCheckModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => onResolveMilestone(false)}
+      >
+        <View
+          style={[styles.milestoneModalOverlay, { backgroundColor: 'rgba(0,0,0,0.45)' }]}
+        >
+          <View
+            style={[
+              styles.milestoneModalCard,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.milestoneModalHeader}>
+              <Ionicons
+                name="sparkles"
+                size={24}
+                color={colors.primary}
+                accessibilityLabel=""
+              />
+              <Text
+                style={[styles.milestoneModalTitle, { color: colors.text }]}
+                accessibilityRole="header"
+              >
+                Milestone
+              </Text>
+            </View>
+            <Text
+              style={[styles.milestoneModalBody, { color: colors.textSecondary }]}
+            >
+              Did you accomplish this milestone?
+            </Text>
+            {checkCp ? (
+              <Text
+                style={[styles.milestoneModalHighlight, { color: colors.text }]}
+              >
+                {checkCp.title}
+              </Text>
+            ) : null}
+            <View style={styles.milestoneModalRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="No, I did not accomplish this milestone"
+                onPress={() => onResolveMilestone(false)}
+                style={({ pressed }) => [
+                  styles.milestoneModalButton,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: colors.surface,
+                  },
+                  pressed && { opacity: 0.9 },
+                ]}
+              >
+                <Text style={[styles.milestoneModalButtonText, { color: colors.text }]}>
+                  No
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Yes, I accomplished this milestone"
+                onPress={() => onResolveMilestone(true)}
+                style={({ pressed }) => [
+                  styles.milestoneModalButton,
+                  {
+                    borderColor: colors.primary,
+                    backgroundColor: colors.primary,
+                  },
+                  pressed && { opacity: 0.9 },
+                ]}
+              >
+                <Text style={[styles.milestoneModalButtonText, { color: '#ffffff' }]}>
+                  Yes
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Screen>
   );
 }
@@ -504,5 +649,50 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#ef4444',
+  },
+  milestoneModalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  milestoneModalCard: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  milestoneModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  milestoneModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  milestoneModalBody: {
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  milestoneModalHighlight: {
+    fontSize: 16,
+    fontWeight: '700',
+    lineHeight: 22,
+  },
+  milestoneModalRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.sm,
+  },
+  milestoneModalButton: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  milestoneModalButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

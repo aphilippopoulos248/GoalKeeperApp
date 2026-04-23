@@ -1,9 +1,18 @@
-import type { Checkpoint } from '../types';
+import type { Checkpoint, Goal } from '../types';
+
+import { computeGoalBarTargetPoints } from './goalBarTargetPoints';
 
 export const MAX_VISIBLE_CHECKPOINTS = 12;
 export const TRACK_LEFT = 2;
 export const DOT_R = 5;
 export const GOAL_R = 6.5;
+
+/**
+ * Fixed width for bar-unlock math when no screen layout is available (e.g. quest
+ * complete handler). Slightly different from on-device `trackWidth` is acceptable
+ * (same formulas as the visible bar).
+ */
+export const REFERENCE_TRACK_WIDTH = 320;
 
 /** Indices of checkpoints shown on the bar when there are many milestones. */
 export function visibleCheckpointIndices(
@@ -101,4 +110,51 @@ export function getCurrentMilestoneToReachIndex(
     (c, i) => !isCheckpointUnlockedByBar(c, i, layout, headX),
   );
   return idx === -1 ? null : idx;
+}
+
+/**
+ * Bar unlock for a single checkpoint at `earned` quest points, using
+ * `REFERENCE_TRACK_WIDTH` and the same `isCheckpointUnlockedByBar` rule.
+ */
+export function isMilestoneUnlockedByPoints(
+  earned: number,
+  targetPoints: number,
+  checkpoint: Checkpoint,
+  checkpointIndex: number,
+  totalCheckpoints: number,
+): boolean {
+  if (totalCheckpoints < 1) return false;
+  const layout = computeTrackLayout(REFERENCE_TRACK_WIDTH, totalCheckpoints);
+  if (!layout) return false;
+  const frac = computePointsBarFraction(earned, targetPoints);
+  const headX = computeBarHeadX(frac, TRACK_LEFT, layout.trackEndX);
+  return isCheckpointUnlockedByBar(checkpoint, checkpointIndex, layout, headX);
+}
+
+/**
+ * Indices of incomplete, revealed milestones that cross from “bar locked” to
+ * “bar unlocked” as points go from `earnedBefore` to `earnedAfter` (larger),
+ * in ascending order. Skips `revealed: false` (legacy pre-title unlock).
+ */
+export function getNewlyUnlockedMilestoneIndices(
+  goal: Pick<Goal, 'checkpoints' | 'targetDateIso'>,
+  earnedBefore: number,
+  earnedAfter: number,
+): number[] {
+  if (earnedAfter <= earnedBefore) return [];
+  const n = goal.checkpoints.length;
+  if (n < 1) return [];
+  const target = computeGoalBarTargetPoints(goal);
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const c = goal.checkpoints[i];
+    if (c.done) continue;
+    if (c.revealed === false) continue;
+    const before = isMilestoneUnlockedByPoints(earnedBefore, target, c, i, n);
+    const after = isMilestoneUnlockedByPoints(earnedAfter, target, c, i, n);
+    if (!before && after) {
+      out.push(i);
+    }
+  }
+  return out;
 }

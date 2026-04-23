@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import type { NavigatorScreenParams } from '@react-navigation/native';
 
 import { GoalsStack } from './GoalsStack';
+import { type GoalsStackParamList } from './goalsStackTypes';
 import { DayScheduleScreen } from '../screens/DayScheduleScreen';
 import { FriendsScreen } from '../screens/FriendsScreen';
 import { MenuScreen } from '../screens/MenuScreen';
@@ -11,7 +13,7 @@ import { useAppTheme } from '../theme/ThemeProvider';
 export type RootTabParamList = {
   Menu: { focusQuestId?: string } | undefined;
   DaySchedule: undefined;
-  ActiveGoals: undefined;
+  ActiveGoals: NavigatorScreenParams<GoalsStackParamList> | undefined;
   Friends: undefined;
   Profile: undefined;
 };

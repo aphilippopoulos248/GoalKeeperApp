@@ -19,6 +19,11 @@ import { fetchWeeklyQuestsForUser } from '../services/supabase/weeklyQuestsRepos
 import type { Quest } from '../types';
 import { clearAttachedExercise } from '../lib/questAttachedExerciseStorage';
 import { clearAttachedRecipe } from '../lib/questAttachedRecipeStorage';
+import {
+  enqueueMilestoneChecks,
+  tryNavigateToFirstMilestoneInQueueAfterEnqueue,
+} from '../navigation/milestoneCheckQueue';
+import { getNewlyUnlockedMilestoneIndices } from '../utils/milestoneProgressLayout';
 import { resolveQuestScheduleBlock } from '../utils/dailyQuestSchedule';
 
 import { useActiveGoals } from './ActiveGoalsContext';
@@ -64,6 +69,10 @@ const QuestProgressContext = createContext<QuestProgressValue | null>(null);
 export function QuestProgressProvider({ children }: { children: React.ReactNode }) {
   const { userId, authReady } = useAuthUser();
   const { goals } = useActiveGoals();
+  const goalsRef = useRef(goals);
+  useEffect(() => {
+    goalsRef.current = goals;
+  }, [goals]);
   const { streak, pointsToday, lifetimeQuestPoints, applyQuestToggle } =
     useDailyStreakAndPointsToday(userId, authReady);
   const [completed, setCompleted] = useState<Record<string, boolean>>({});
@@ -159,6 +168,22 @@ export function QuestProgressProvider({ children }: { children: React.ReactNode 
           nextEarned[entry.goalId] = earned;
           if (userId) {
             queueMicrotask(() => void upsertGoalBarEarned(userId, entry.goalId, earned));
+          }
+          if (delta > 0 && userId) {
+            const goal = goalsRef.current.find((g) => g.id === entry.goalId);
+            if (goal) {
+              const newIdxs = getNewlyUnlockedMilestoneIndices(goal, cur, earned);
+              if (newIdxs.length > 0) {
+                const items = newIdxs.map((i) => ({
+                  goalId: entry.goalId,
+                  checkpointId: goal.checkpoints[i]!.id,
+                }));
+                const wasEmpty = enqueueMilestoneChecks(items);
+                if (wasEmpty) {
+                  queueMicrotask(() => tryNavigateToFirstMilestoneInQueueAfterEnqueue());
+                }
+              }
+            }
           }
           return nextEarned;
         });
