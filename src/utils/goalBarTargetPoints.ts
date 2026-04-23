@@ -4,7 +4,7 @@ import type { Goal } from '../types';
 const MIN_TARGET = 120;
 const MAX_TARGET = 420;
 /** Scale on the interpolated target: higher = more quest points to fill the bar. */
-const TARGET_MULTIPLIER = 4;
+const TARGET_MULTIPLIER = 30;
 const MIN_DAYS = 7;
 const MAX_DAYS = 365;
 const DEFAULT_DAYS = 60;
