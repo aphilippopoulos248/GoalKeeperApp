@@ -3,6 +3,7 @@ import {
   NavigationContainer,
   Theme,
 } from '@react-navigation/native';
+import { View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -14,6 +15,7 @@ import { QuestProgressProvider } from './src/context/QuestProgressContext';
 import { initProgressReflectionNotificationHandler } from './src/lib/progressReflectionNotifications';
 import { rootNavigationRef } from './src/navigation/rootNavigationRef';
 import { RootStack } from './src/navigation/RootStack';
+import { KeyboardDoneToolbar } from './src/components/KeyboardDoneToolbar';
 import { ThemeProvider, useAppTheme } from './src/theme/ThemeProvider';
 
 function AppNavigation() {
@@ -48,13 +50,16 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <AuthUserProvider>
-            <ActiveGoalsProvider>
-              <QuestProgressProvider>
-                <AppNavigation />
-              </QuestProgressProvider>
-            </ActiveGoalsProvider>
-          </AuthUserProvider>
+          <View style={{ flex: 1 }}>
+            <AuthUserProvider>
+              <ActiveGoalsProvider>
+                <QuestProgressProvider>
+                  <AppNavigation />
+                </QuestProgressProvider>
+              </ActiveGoalsProvider>
+            </AuthUserProvider>
+            <KeyboardDoneToolbar />
+          </View>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
