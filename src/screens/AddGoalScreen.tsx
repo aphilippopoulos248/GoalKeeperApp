@@ -2,12 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, {
   DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
-import { Picker } from '@react-native-picker/picker';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -90,6 +90,18 @@ function milestoneFrequencyForHorizonDays(days: number): MilestoneFrequency {
   return 'monthly';
 }
 
+const PRIORITY_OPTIONS: { id: GoalPriority; label: string }[] = [
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+];
+
+const MILESTONE_FREQUENCY_OPTIONS: { id: MilestoneFrequency; label: string }[] = [
+  { id: 'weekly', label: 'Weekly' },
+  { id: 'biweekly', label: 'Bi-Weekly' },
+  { id: 'monthly', label: 'Monthly' },
+];
+
 const DEFAULT_MEASUREMENT_QUESTION =
   'What number or amount would make this goal concrete and easy to track?';
 
@@ -134,6 +146,20 @@ export function AddGoalScreen({ navigation }: Props) {
   const [priority, setPriority] = useState<GoalPriority>('medium');
   const [milestoneFrequency, setMilestoneFrequency] =
     useState<MilestoneFrequency>('weekly');
+  const [planningFieldModal, setPlanningFieldModal] = useState<
+    null | 'priority' | 'milestone'
+  >(null);
+
+  const priorityLabel = useMemo(
+    () => PRIORITY_OPTIONS.find((o) => o.id === priority)?.label ?? 'Medium',
+    [priority],
+  );
+  const milestoneFrequencyLabel = useMemo(
+    () =>
+      MILESTONE_FREQUENCY_OPTIONS.find((o) => o.id === milestoneFrequency)?.label ??
+      'Weekly',
+    [milestoneFrequency],
+  );
 
   const [busy, setBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -150,6 +176,12 @@ export function AddGoalScreen({ navigation }: Props) {
       milestoneFrequencyForHorizonDays(calendarDaysFromTodayTo(targetDate)),
     );
   }, [targetDate]);
+
+  useEffect(() => {
+    if (phase !== 'planning') {
+      setPlanningFieldModal(null);
+    }
+  }, [phase]);
 
   const combinedGoalText = useMemo(
     () =>
@@ -853,52 +885,54 @@ export function AddGoalScreen({ navigation }: Props) {
             'Choose priority and how often you want milestones. Then we will run an achievability review.',
           )}
           <Text style={[styles.label, { color: colors.textSecondary }]}>Priority</Text>
-          <View
-            style={[
-              styles.pickerWrapOuter,
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Priority, ${priorityLabel}. Opens menu.`}
+            accessibilityState={{ expanded: planningFieldModal === 'priority' }}
+            onPress={() => setPlanningFieldModal('priority')}
+            style={({ pressed }) => [
+              styles.prefSelectTrigger,
               {
-                backgroundColor: colors.surfaceElevated,
+                backgroundColor: colors.background,
                 borderColor: colors.border,
               },
+              pressed && { opacity: 0.88 },
             ]}
           >
-            <Picker
-              selectedValue={priority}
-              onValueChange={(v) => setPriority(v as GoalPriority)}
-              style={[styles.picker, { color: colors.text }]}
-              mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-              dropdownIconColor={colors.textSecondary}
+            <Text
+              style={[styles.prefSelectTriggerText, { color: colors.text }]}
+              numberOfLines={1}
             >
-              <Picker.Item label="Low" value="low" color={colors.text} />
-              <Picker.Item label="Medium" value="medium" color={colors.text} />
-              <Picker.Item label="High" value="high" color={colors.text} />
-            </Picker>
-          </View>
+              {priorityLabel}
+            </Text>
+            <Ionicons name="chevron-down" size={20} color={colors.primary} />
+          </Pressable>
 
           <Text style={[styles.label, { color: colors.textSecondary }]}>
             Milestone frequency
           </Text>
-          <View
-            style={[
-              styles.pickerWrapOuter,
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Milestone frequency, ${milestoneFrequencyLabel}. Opens menu.`}
+            accessibilityState={{ expanded: planningFieldModal === 'milestone' }}
+            onPress={() => setPlanningFieldModal('milestone')}
+            style={({ pressed }) => [
+              styles.prefSelectTrigger,
               {
-                backgroundColor: colors.surfaceElevated,
+                backgroundColor: colors.background,
                 borderColor: colors.border,
               },
+              pressed && { opacity: 0.88 },
             ]}
           >
-            <Picker
-              selectedValue={milestoneFrequency}
-              onValueChange={(v) => setMilestoneFrequency(v as MilestoneFrequency)}
-              style={[styles.picker, { color: colors.text }]}
-              mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-              dropdownIconColor={colors.textSecondary}
+            <Text
+              style={[styles.prefSelectTriggerText, { color: colors.text }]}
+              numberOfLines={1}
             >
-              <Picker.Item label="Weekly" value="weekly" color={colors.text} />
-              <Picker.Item label="Bi-Weekly" value="biweekly" color={colors.text} />
-              <Picker.Item label="Monthly" value="monthly" color={colors.text} />
-            </Picker>
-          </View>
+              {milestoneFrequencyLabel}
+            </Text>
+            <Ionicons name="chevron-down" size={20} color={colors.primary} />
+          </Pressable>
 
           <Pressable
             accessibilityRole="button"
@@ -1036,6 +1070,116 @@ export function AddGoalScreen({ navigation }: Props) {
 
         {renderBody()}
       </ScrollView>
+      <Modal
+        visible={planningFieldModal != null}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPlanningFieldModal(null)}
+      >
+        <View style={styles.planningFieldModalRoot}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss"
+            style={[
+              styles.planningFieldModalBackdrop,
+              { backgroundColor: 'rgba(0,0,0,0.45)' },
+            ]}
+            onPress={() => setPlanningFieldModal(null)}
+          />
+          <View
+            style={[
+              styles.planningFieldModalPanel,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[styles.planningFieldModalHeading, { color: colors.textSecondary }]}
+            >
+              {planningFieldModal === 'milestone' ? 'Milestone frequency' : 'Priority'}
+            </Text>
+            {planningFieldModal === 'priority'
+              ? PRIORITY_OPTIONS.map((opt, index) => {
+                  const selected = opt.id === priority;
+                  const isLast = index === PRIORITY_OPTIONS.length - 1;
+                  return (
+                    <Pressable
+                      key={opt.id}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      onPress={() => {
+                        setPriority(opt.id);
+                        setPlanningFieldModal(null);
+                      }}
+                      style={({ pressed }) => [
+                        styles.planningFieldModalOption,
+                        !isLast && [
+                          styles.planningFieldModalOptionBorder,
+                          { borderBottomColor: colors.border },
+                        ],
+                        pressed && { opacity: 0.85 },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.planningFieldModalOptionLabel,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                      {selected ? (
+                        <Ionicons name="checkmark" size={22} color={colors.primary} />
+                      ) : (
+                        <View style={styles.planningFieldModalCheckSpacer} />
+                      )}
+                    </Pressable>
+                  );
+                })
+              : planningFieldModal === 'milestone'
+                ? MILESTONE_FREQUENCY_OPTIONS.map((opt, index) => {
+                    const selected = opt.id === milestoneFrequency;
+                    const isLast = index === MILESTONE_FREQUENCY_OPTIONS.length - 1;
+                    return (
+                      <Pressable
+                        key={opt.id}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        onPress={() => {
+                          setMilestoneFrequency(opt.id);
+                          setPlanningFieldModal(null);
+                        }}
+                        style={({ pressed }) => [
+                          styles.planningFieldModalOption,
+                          !isLast && [
+                            styles.planningFieldModalOptionBorder,
+                            { borderBottomColor: colors.border },
+                          ],
+                          pressed && { opacity: 0.85 },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.planningFieldModalOptionLabel,
+                            { color: colors.text },
+                          ]}
+                        >
+                          {opt.label}
+                        </Text>
+                        {selected ? (
+                          <Ionicons name="checkmark" size={22} color={colors.primary} />
+                        ) : (
+                          <View style={styles.planningFieldModalCheckSpacer} />
+                        )}
+                      </Pressable>
+                    );
+                  })
+                : null}
+          </View>
+        </View>
+      </Modal>
     </Screen>
   );
 }
@@ -1142,14 +1286,62 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: spacing.lg,
   },
-  pickerWrapOuter: {
+  prefSelectTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.xs,
     borderRadius: radius.md,
     borderWidth: 1,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
     marginBottom: spacing.md,
+  },
+  prefSelectTriggerText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    minWidth: 0,
+  },
+  planningFieldModalRoot: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  planningFieldModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  planningFieldModalPanel: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
     overflow: 'hidden',
   },
-  picker: {
-    marginVertical: -4,
+  planningFieldModalHeading: {
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    paddingTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xs,
+  },
+  planningFieldModalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  planningFieldModalOptionBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  planningFieldModalOptionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  planningFieldModalCheckSpacer: {
+    width: 22,
+    height: 22,
   },
   doneRow: {
     alignItems: 'flex-end',
