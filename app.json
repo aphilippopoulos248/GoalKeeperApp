@@ -15,6 +15,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.goalkeeperapp.app",
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSUserNotificationsUsageDescription": "GoalKeeper can remind you when your daily reflection is ready so your quests stay aligned with your real progress."
       }
     },
