@@ -1,3 +1,5 @@
+import { FunctionsHttpError } from '@supabase/functions-js';
+
 import { supabase } from '../lib/supabase';
 
 export class SubmitAppFeedbackError extends Error {
@@ -5,6 +7,27 @@ export class SubmitAppFeedbackError extends Error {
     super(message);
     this.name = 'SubmitAppFeedbackError';
   }
+}
+
+async function errorBodyFromFunctionsHttpError(
+  err: FunctionsHttpError,
+): Promise<string | null> {
+  const res = err.context as Response | undefined;
+  if (!res || typeof res.json !== 'function') return null;
+  try {
+    const body = (await res.json()) as unknown;
+    if (
+      body &&
+      typeof body === 'object' &&
+      'error' in body &&
+      typeof (body as { error: unknown }).error === 'string'
+    ) {
+      return (body as { error: string }).error;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 export async function submitAppFeedback(message: string): Promise<void> {
@@ -18,6 +41,12 @@ export async function submitAppFeedback(message: string): Promise<void> {
   });
 
   if (error) {
+    if (error instanceof FunctionsHttpError) {
+      const fromBody = await errorBodyFromFunctionsHttpError(error);
+      if (fromBody) {
+        throw new SubmitAppFeedbackError(fromBody);
+      }
+    }
     throw new SubmitAppFeedbackError(
       error.message || 'Could not send feedback. Try again later.',
     );
