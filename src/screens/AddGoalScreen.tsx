@@ -19,6 +19,8 @@ import {
 
 import { Screen } from '../components/Screen';
 import { useActiveGoals } from '../context/ActiveGoalsContext';
+import { useAuthUser } from '../context/AuthUserContext';
+import { ADMIN_EMAIL } from '../constants/admin';
 import { GoalsStackParamList } from '../navigation/goalsStackTypes';
 import {
   GoalPlannerError,
@@ -116,7 +118,9 @@ function buildRichDescription(input: {
 
 export function AddGoalScreen({ navigation }: Props) {
   const { colors, mode } = useAppTheme();
+  const { userEmail } = useAuthUser();
   const { addGoal, goals, lifeScheduleSlots } = useActiveGoals();
+  const showDebugSampleFill = __DEV__ && userEmail === ADMIN_EMAIL;
 
   const [phase, setPhase] = useState<Phase>('title');
   const [shortTitle, setShortTitle] = useState('');
@@ -358,6 +362,7 @@ export function AddGoalScreen({ navigation }: Props) {
   }, [achievabilityCritique]);
 
   const fillDebugSampleGoal = useCallback(() => {
+    if (!__DEV__ || userEmail !== ADMIN_EMAIL) return;
     // #region agent log
     fetch('http://127.0.0.1:7515/ingest/0f06e101-6d67-40ce-af4e-e83fcb67c81a', {
       method: 'POST',
@@ -400,7 +405,7 @@ export function AddGoalScreen({ navigation }: Props) {
     setPriority('medium');
     setMilestoneFrequency('weekly');
     setPhase('prefs');
-  }, []);
+  }, [userEmail]);
 
   const createGoal = useCallback(async () => {
     setSubmitting(true);
@@ -1012,7 +1017,7 @@ export function AddGoalScreen({ navigation }: Props) {
 
         <Text style={[styles.heading, { color: colors.text }]}>New goal</Text>
 
-        {__DEV__ ? (
+        {showDebugSampleFill ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Debug fill sample goal"

@@ -5,8 +5,10 @@ import {
   ActivityIndicator,
   Image,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -19,6 +21,7 @@ import {
   fetchProfileOnboardingFields,
   type ProfileOnboardingFields,
 } from '../services/supabase/profileRepository';
+import { submitAppFeedback } from '../services/submitAppFeedback';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { radius, spacing } from '../theme/spacing';
 
@@ -41,6 +44,10 @@ export function ProfileScreen({ navigation }: Props) {
   const [profileEmail, setProfileEmail] = useState<string | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [avatarImageError, setAvatarImageError] = useState(false);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [feedbackSent, setFeedbackSent] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +100,23 @@ export function ProfileScreen({ navigation }: Props) {
     setAvatarImageError(false);
   }, [profileAvatarUrl]);
 
+  const onSendFeedback = async () => {
+    setFeedbackError(null);
+    setFeedbackSent(false);
+    setFeedbackSubmitting(true);
+    try {
+      await submitAppFeedback(feedbackText);
+      setFeedbackText('');
+      setFeedbackSent(true);
+    } catch (e) {
+      const msg =
+        e instanceof Error ? e.message : 'Could not send feedback. Try again later.';
+      setFeedbackError(msg);
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
+
   const onLogOut = async () => {
     setLogoutError(null);
     setLoggingOut(true);
@@ -109,9 +133,17 @@ export function ProfileScreen({ navigation }: Props) {
   const glowOuterOpacity = mode === 'dark' ? 0.22 : 0.12;
   const glowInnerOpacity = mode === 'dark' ? 0.35 : 0.18;
 
+  const feedbackTrimmed = feedbackText.trim();
+  const feedbackSendDisabled =
+    feedbackSubmitting || feedbackTrimmed.length === 0 || loggingOut;
+
   return (
     <Screen>
-      <View style={styles.centerColumn}>
+      <ScrollView
+        contentContainerStyle={styles.centerColumn}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.hero}>
           <View
             style={[
@@ -259,8 +291,70 @@ export function ProfileScreen({ navigation }: Props) {
               <Text style={styles.logoutLabel}>Log out</Text>
             )}
           </Pressable>
+
+          <View style={[styles.feedbackDivider, { backgroundColor: colors.border }]} />
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: 0 }]}>
+            Feedback
+          </Text>
+          <Text style={[styles.feedbackHint, { color: colors.textSecondary }]}>
+            Tell us what you think about GoalKeeper. Your message is sent to the team.
+          </Text>
+          <TextInput
+            value={feedbackText}
+            onChangeText={(t) => {
+              setFeedbackText(t);
+              setFeedbackSent(false);
+              setFeedbackError(null);
+            }}
+            placeholder="Your thoughts, bugs, or ideas…"
+            placeholderTextColor={colors.textSecondary}
+            multiline
+            editable={!feedbackSubmitting && !loggingOut}
+            style={[
+              styles.feedbackInput,
+              {
+                color: colors.text,
+                borderColor: colors.border,
+                backgroundColor: colors.surface,
+              },
+            ]}
+            textAlignVertical="top"
+            accessibilityLabel="App feedback message"
+          />
+          {feedbackError ? (
+            <Text style={styles.feedbackError} accessibilityLiveRegion="polite">
+              {feedbackError}
+            </Text>
+          ) : null}
+          {feedbackSent ? (
+            <Text style={[styles.feedbackSuccess, { color: colors.primary }]} accessibilityLiveRegion="polite">
+              Thanks — your feedback was sent.
+            </Text>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Send feedback"
+            onPress={() => void onSendFeedback()}
+            disabled={feedbackSendDisabled}
+            style={({ pressed }) => [
+              styles.feedbackSendButton,
+              {
+                borderColor: colors.primary,
+                backgroundColor: colors.surfaceElevated,
+              },
+              (pressed || feedbackSendDisabled) && { opacity: 0.85 },
+            ]}
+          >
+            {feedbackSubmitting ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (
+              <Text style={[styles.feedbackSendLabel, { color: colors.primary }]}>
+                Send feedback
+              </Text>
+            )}
+          </Pressable>
         </View>
-      </View>
+      </ScrollView>
     </Screen>
   );
 }
@@ -270,6 +364,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     alignItems: 'center',
     paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
   },
   hero: {
     width: 220,
@@ -407,5 +502,55 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
     color: '#ef4444',
+  },
+  feedbackDivider: {
+    height: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    marginTop: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  feedbackHint: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: spacing.sm,
+    alignSelf: 'stretch',
+  },
+  feedbackInput: {
+    alignSelf: 'stretch',
+    minHeight: 100,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: 16,
+    marginBottom: spacing.sm,
+  },
+  feedbackError: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: spacing.sm,
+    color: '#ef4444',
+    alignSelf: 'stretch',
+  },
+  feedbackSuccess: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: spacing.sm,
+    alignSelf: 'stretch',
+  },
+  feedbackSendButton: {
+    marginTop: spacing.xs,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    minHeight: 52,
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+  },
+  feedbackSendLabel: {
+    fontSize: 17,
+    fontWeight: '700',
   },
 });

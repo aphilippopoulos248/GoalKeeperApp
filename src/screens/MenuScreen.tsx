@@ -46,6 +46,7 @@ import {
   loadAllAttachedRecipes,
   type QuestAttachedRecipeMap,
 } from '../lib/questAttachedRecipeStorage';
+import { ADMIN_EMAIL } from '../constants/admin';
 import {
   dailyQuestCountForPriority,
   parseGoalPriority,
@@ -61,7 +62,6 @@ type MenuQuestSection = {
 const DEBUG_NARRATIVE_ALERT_MAX = 4000;
 /** Per-section cap so combined alert text stays readable on device alerts. */
 const DEBUG_JOURNAL_SECTION_MAX = 2200;
-const ADMIN_PANEL_EMAIL = 'admin@example.com';
 
 type MenuScreenNavigation = CompositeNavigationProp<
   BottomTabNavigationProp<RootTabParamList, 'Menu'>,
@@ -95,7 +95,7 @@ function prioritySortRank(p: GoalPriority): number {
 export function MenuScreen() {
   const { colors } = useAppTheme();
   const { userEmail, userId } = useAuthUser();
-  const showAdminPanel = userEmail === ADMIN_PANEL_EMAIL;
+  const showAdminPanel = userEmail === ADMIN_EMAIL;
   const navigation = useNavigation<MenuScreenNavigation>();
   const route = useRoute<RouteProp<RootTabParamList, 'Menu'>>();
   const listRef = useRef<SectionList<DailyQuestEntry, MenuQuestSection>>(null);
