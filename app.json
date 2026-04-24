@@ -13,11 +13,13 @@
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.goalkeeperapp.app",
       "infoPlist": {
         "NSUserNotificationsUsageDescription": "GoalKeeper can remind you when your daily reflection is ready so your quests stay aligned with your real progress."
       }
     },
     "android": {
+      "package": "com.goalkeeperapp.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
