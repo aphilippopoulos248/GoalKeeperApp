@@ -6,12 +6,13 @@ import {
   type CompositeNavigationProp,
   type RouteProp,
 } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Picker } from '@react-native-picker/picker';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Platform,
   Pressable,
   SectionList,
@@ -53,6 +54,12 @@ import {
 } from '../utils/goalPriority';
 
 type DailyQuestSortMode = 'recommended' | 'goal' | 'priority';
+
+const DAILY_QUEST_SORT_OPTIONS: { id: DailyQuestSortMode; label: string }[] = [
+  { id: 'recommended', label: 'Recommended' },
+  { id: 'goal', label: 'Goal' },
+  { id: 'priority', label: 'Priority' },
+];
 
 type MenuQuestSection = {
   key: 'active' | 'completed';
@@ -108,6 +115,11 @@ export function MenuScreen() {
     fetchJournalDebugSnapshot,
   } = useActiveGoals();
   const [sortMode, setSortMode] = useState<DailyQuestSortMode>('recommended');
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const sortModeLabel = useMemo(
+    () => DAILY_QUEST_SORT_OPTIONS.find((o) => o.id === sortMode)?.label ?? 'Recommended',
+    [sortMode],
+  );
   const [debugRefreshingQuests, setDebugRefreshingQuests] = useState(false);
   const [debugJournalText, setDebugJournalText] = useState('');
   const [debugJournalSaving, setDebugJournalSaving] = useState(false);
@@ -699,36 +711,28 @@ export function MenuScreen() {
               <Text style={[styles.sectionHeading, { color: colors.text }]}>
                 Daily quests
               </Text>
-              <View
-                style={[
-                  styles.sortPickerWrap,
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Sort daily quests, ${sortModeLabel}. Opens menu.`}
+                accessibilityState={{ expanded: sortMenuOpen }}
+                onPress={() => setSortMenuOpen(true)}
+                style={({ pressed }) => [
+                  styles.sortTrigger,
                   {
-                    backgroundColor: colors.surfaceElevated,
+                    backgroundColor: colors.background,
                     borderColor: colors.border,
                   },
+                  pressed && { opacity: 0.88 },
                 ]}
               >
-                <Picker
-                  accessibilityLabel="Sort daily quests"
-                  selectedValue={sortMode}
-                  onValueChange={(v) => setSortMode(v as DailyQuestSortMode)}
-                  style={[styles.sortPicker, { color: colors.text }]}
-                  mode={Platform.OS === 'android' ? 'dropdown' : undefined}
-                  dropdownIconColor={colors.textSecondary}
+                <Text
+                  style={[styles.sortTriggerText, { color: colors.text }]}
+                  numberOfLines={1}
                 >
-                  <Picker.Item
-                    label="Recommended"
-                    value="recommended"
-                    color={colors.text}
-                  />
-                  <Picker.Item label="Goal" value="goal" color={colors.text} />
-                  <Picker.Item
-                    label="Priority"
-                    value="priority"
-                    color={colors.text}
-                  />
-                </Picker>
-              </View>
+                  {sortModeLabel}
+                </Text>
+                <Ionicons name="chevron-down" size={20} color={colors.primary} />
+              </Pressable>
             </View>
             {showDailyLoading ? (
               <Text style={[styles.loadingHint, { color: colors.textSecondary }]}>
@@ -746,7 +750,7 @@ export function MenuScreen() {
         </View>
       );
     },
-    [colors, showDailyLoading, sortMode],
+    [colors, showDailyLoading, sortMode, sortModeLabel, sortMenuOpen],
   );
 
   return (
@@ -763,6 +767,70 @@ export function MenuScreen() {
         keyboardShouldPersistTaps="handled"
         stickySectionHeadersEnabled={false}
       />
+      <Modal
+        visible={sortMenuOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSortMenuOpen(false)}
+      >
+        <View style={styles.sortModalRoot}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss"
+            style={[styles.sortModalBackdrop, { backgroundColor: 'rgba(0,0,0,0.45)' }]}
+            onPress={() => setSortMenuOpen(false)}
+          />
+          <View
+            style={[
+              styles.sortModalPanel,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[styles.sortModalHeading, { color: colors.textSecondary }]}
+            >
+              Sort by
+            </Text>
+            {DAILY_QUEST_SORT_OPTIONS.map((opt, index) => {
+              const selected = opt.id === sortMode;
+              const isLast = index === DAILY_QUEST_SORT_OPTIONS.length - 1;
+              return (
+                <Pressable
+                  key={opt.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  onPress={() => {
+                    setSortMode(opt.id);
+                    setSortMenuOpen(false);
+                  }}
+                  style={({ pressed }) => [
+                    styles.sortModalOption,
+                    !isLast && [
+                      styles.sortModalOptionBorder,
+                      { borderBottomColor: colors.border },
+                    ],
+                    pressed && { opacity: 0.85 },
+                  ]}
+                >
+                  <Text
+                    style={[styles.sortModalOptionLabel, { color: colors.text }]}
+                  >
+                    {opt.label}
+                  </Text>
+                  {selected ? (
+                    <Ionicons name="checkmark" size={22} color={colors.primary} />
+                  ) : (
+                    <View style={styles.sortModalOptionCheckSpacer} />
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </Modal>
       <AttachedRecipeModal
         recipe={attachedRecipeViewer}
         onClose={() => setAttachedRecipeViewer(null)}
@@ -790,15 +858,63 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
-  sortPickerWrap: {
+  sortTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    flexShrink: 0,
+    maxWidth: '52%',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     borderWidth: 1,
-    minWidth: 148,
+    justifyContent: 'space-between',
+  },
+  sortTriggerText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    minWidth: 0,
+  },
+  sortModalRoot: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  sortModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  sortModalPanel: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
     overflow: 'hidden',
   },
-  sortPicker: {
-    width: '100%',
-    marginVertical: -4,
+  sortModalHeading: {
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    paddingTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xs,
+  },
+  sortModalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  sortModalOptionBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  sortModalOptionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  sortModalOptionCheckSpacer: {
+    width: 22,
+    height: 22,
   },
   loadingHint: {
     fontSize: 14,
